@@ -69,4 +69,14 @@ class JudgeTest {
     assertEquals(Verdict.NO, r.feasible());
     assertTrue(r.legs().get(0).reason().contains("우회"));
   }
+
+  @Test void 탑승정류소_시각미확인_UNKNOWN() { // A안 확장: 정차 확실·시각 미상 탑승 (남부2 도장포)
+    var s = new Snapshot("2026-09-09", DayClass.WEEKDAY,
+        List.of(trip(9, "N",
+            ts("도장포", StopStatus.TEXT, null), ts("학동", StopStatus.TEXT, null))),
+        List.of());
+    var r = Judge.judge(s, List.of(new Leg.Bus("도장포", "학동", false)), 0);
+    assertEquals(Verdict.UNKNOWN, r.feasible());
+    assertTrue(r.legs().get(0).reason().contains("[미확인]"));
+  }
 }

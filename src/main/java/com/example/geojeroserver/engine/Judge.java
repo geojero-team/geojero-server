@@ -68,9 +68,17 @@ public final class Judge {
       }
       var cands = candidates(s, bus.from(), bus.boardOnly() ? null : bus.to());
       if (cands.isEmpty()) {
-        results.add(new LegResult(Verdict.NO, null, null,
-            bus.from() + "→" + bus.to() + " 운행 없음"));
-        overall = Verdict.NO;
+        // A안 확장 (2026-09-06 지시): 탑승 정류소가 '[미확인]'(정차 확실·시각 미상)이면
+        // 거짓 불성립 대신 UNKNOWN — 남부2 평일 도장포→학동이 이 경우다.
+        if (hasTextBoarding(s, bus)) {
+          results.add(new LegResult(Verdict.UNKNOWN, null, null,
+              bus.from() + " 출발 시각 [미확인] — 성립으로 추정하지 않음"));
+          if (overall == Verdict.YES) overall = Verdict.UNKNOWN;
+        } else {
+          results.add(new LegResult(Verdict.NO, null, null,
+              bus.from() + "→" + bus.to() + " 운행 없음"));
+          overall = Verdict.NO;
+        }
         continue;
       }
       final int now = t;
@@ -94,6 +102,21 @@ public final class Judge {
       if (p.arriveMin() != null) t = p.arriveMin();
     }
     return new JudgeResult(overall, List.copyOf(results));
+  }
+
+  /** 정차는 확실하나 시각이 미상(TEXT='[미확인]')인 탑승이 가능한 회차가 있는가. */
+  private static boolean hasTextBoarding(Snapshot s, Leg.Bus bus) {
+    for (Trip t : s.trips()) {
+      int i = indexOf(t, bus.from(), 0);
+      if (i < 0 || t.stops().get(i).status() != StopStatus.TEXT) continue;
+      if (bus.boardOnly()) return true;
+      int j = indexOf(t, bus.to(), i + 1);
+      if (j >= 0) {
+        var st = t.stops().get(j).status();
+        if (st != StopStatus.SKIP && st != StopStatus.EMPTY) return true;
+      }
+    }
+    return false;
   }
 
   public static Integer lastDeparture(Snapshot s, String from, String to) {
