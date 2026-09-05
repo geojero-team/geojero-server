@@ -1,0 +1,69 @@
+package com.example.geojeroserver.api;
+
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class PoiController {
+  public record PoiListItem(long poiId, String name, String kind, String tier,
+                            boolean hasEnglish) {}
+  public record PoisRes(List<PoiListItem> pois) {}
+  public record PoiDetailRes(long poiId, String name, String kind, String tier,
+                             String lang, boolean langFallback, Map<String, Object> detail,
+                             String checkUrl, String lastDeparture) {}
+
+  private final JdbcTemplate jdbc;
+
+  public PoiController(JdbcTemplate jdbc) {
+    this.jdbc = jdbc;
+  }
+
+  @GetMapping("/api/pois")
+  public PoisRes list() {
+    return new PoisRes(jdbc.query("""
+        SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier,
+               EXISTS(SELECT 1 FROM poi_i18n i
+                      WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
+                        AND i.matched_by = 'HUMAN') AS has_en
+        FROM pois p ORDER BY p.poi_id""",
+        (rs, i) -> new PoiListItem(rs.getLong(1), rs.getString(2), rs.getString(3),
+            rs.getString(4), rs.getBoolean(5))));
+  }
+
+  @GetMapping("/api/pois/{poiId}")
+  public PoiDetailRes detail(@PathVariable long poiId,
+      @RequestParam(defaultValue = "ko") String lang) {
+    return jdbc.queryForObject("""
+        SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
+               p.last_departure_time,
+               EXISTS(SELECT 1 FROM poi_i18n i
+                      WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
+                        AND i.matched_by = 'HUMAN') AS has_en
+        FROM pois p WHERE p.poi_id = ?""",
+        (rs, i) -> {
+          boolean hasEn = rs.getBoolean("has_en");
+          boolean wantEn = "en".equalsIgnoreCase(lang);
+          boolean fallback = wantEn && !hasEn;
+          var last = rs.getObject("last_departure_time", LocalTime.class);
+          // TourAPI 런타임 연동 전(후속 태스크) — 폴백형 고정. "이유 없는 빈칸" 금지: 이유+시각 필수.
+          Map<String, Object> detail = new java.util.LinkedHashMap<>();
+          detail.put("source", "FALLBACK");
+          detail.put("intro", rs.getString("intro_text"));
+          detail.put("reason", "관광정보 확인 실패");
+          detail.put("checkedAt", Instant.now().toString());
+          return new PoiDetailRes(rs.getLong("poi_id"), rs.getString("poi_name"),
+              rs.getString("poi_kind"), rs.getString("tier"),
+              fallback || !wantEn ? "ko" : "en", fallback, detail,
+              rs.getString("check_url"),
+              last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")));
+        }, poiId);
+  }
+}

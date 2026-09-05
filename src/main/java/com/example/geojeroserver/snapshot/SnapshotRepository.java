@@ -21,7 +21,7 @@ public class SnapshotRepository {
   }
 
   private static final class TripAcc {
-    long tripId; String routeNo; int direction; String headsign;
+    long tripId; String routeNo; int direction; String headsign; String noteRaw;
     final List<TripStop> stops = new ArrayList<>();
   }
 
@@ -46,7 +46,7 @@ public class SnapshotRepository {
 
     var byTrip = new LinkedHashMap<Long, TripAcc>();
     jdbc.query("""
-        SELECT t.trip_id, r.route_no, t.direction, t.headsign_raw,
+        SELECT t.trip_id, r.route_no, t.direction, t.headsign_raw, t.note_raw,
                ts.seq, s.stop_name, ts.status, ts.depart_min, ts.raw_text
         FROM trips t
         JOIN timetable_versions v ON v.version_id = t.version_id
@@ -65,6 +65,7 @@ public class SnapshotRepository {
           acc.routeNo = routeNo;
           acc.direction = rs.getInt("direction");
           acc.headsign = rs.getString("headsign_raw");
+          acc.noteRaw = rs.getString("note_raw");
           // ⭐ A안 (2026-09-05 확정): TEXT 2종 분리 — 이 분기를 빠뜨리면 회귀 10이 무너진다.
           //    원문 프로즈(경로 설명 문장) = 미정차(EMPTY), seed의 '[미확인]'만 정차·시각미상(TEXT).
           var status = StopStatus.valueOf(rs.getString("status"));
@@ -77,7 +78,7 @@ public class SnapshotRepository {
         date, date);
 
     List<Trip> trips = byTrip.values().stream()
-        .map(a -> new Trip(a.tripId, a.routeNo, a.direction, a.headsign, List.copyOf(a.stops)))
+        .map(a -> new Trip(a.tripId, a.routeNo, a.direction, a.headsign, a.noteRaw, List.copyOf(a.stops)))
         .toList();
     return new Snapshot(date.toString(), dayClass, trips, alerts);
   }

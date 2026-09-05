@@ -10,7 +10,7 @@ class JudgeTest {
     return new TripStop(stop, st, min);
   }
   private static Trip trip(long id, String route, TripStop... stops) {
-    return new Trip(id, route, 0, null, List.of(stops));
+    return new Trip(id, route, 0, null, null, List.of(stops));
   }
 
   static final Snapshot SNAP = new Snapshot("2026-09-09", DayClass.WEEKDAY,
