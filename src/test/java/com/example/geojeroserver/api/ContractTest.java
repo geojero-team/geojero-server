@@ -22,7 +22,8 @@ class ContractTest {
         "/api/routes/55/timetable?date=2026-09-09",
         "/api/stops/고현/departures?to=해금강&date=2026-09-09",
         "/api/pois", "/api/pois/1", "/api/courses",
-        "/api/alerts?date=2026-09-09", "/api/me", "/api/saved-trips"}) {
+        "/api/alerts?date=2026-09-09"}) {
+      // /api/me·/api/saved-trips는 로그인 평면 — 비로그인 401 검증은 AuthTripsTest
       mvc.perform(get(url)).andExpect(status().isOk());
     }
   }
