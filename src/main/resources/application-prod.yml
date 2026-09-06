@@ -9,7 +9,4 @@ spring:
       ddl-auto: validate
     show-sql: false
   cors:
-    allowed-origins:
-      - http://localhost:5173
-      - https://geojero-client.vercel.app
-      - https://geojero-client-*.vercel.app
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
