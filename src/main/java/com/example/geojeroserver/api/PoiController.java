@@ -1,10 +1,10 @@
 package com.example.geojeroserver.api;
 
-import java.time.Instant;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import com.example.geojeroserver.tour.TourApiClient;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,9 +21,11 @@ public class PoiController {
                              String checkUrl, String lastDeparture) {}
 
   private final JdbcTemplate jdbc;
+  private final TourApiClient tourApi;
 
-  public PoiController(JdbcTemplate jdbc) {
+  public PoiController(JdbcTemplate jdbc, TourApiClient tourApi) {
     this.jdbc = jdbc;
+    this.tourApi = tourApi;
   }
 
   @GetMapping("/api/pois")
@@ -43,25 +45,23 @@ public class PoiController {
       @RequestParam(defaultValue = "ko") String lang) {
     return jdbc.queryForObject("""
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
-               p.last_departure_time,
-               EXISTS(SELECT 1 FROM poi_i18n i
-                      WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
-                        AND i.matched_by = 'HUMAN') AS has_en
+               p.last_departure_time, p.tour_content_id,
+               (SELECT i.tour_content_id FROM poi_i18n i
+                 WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
+                   AND i.matched_by = 'HUMAN') AS en_content_id
         FROM pois p WHERE p.poi_id = ?""",
         (rs, i) -> {
-          boolean hasEn = rs.getBoolean("has_en");
+          String enContentId = rs.getString("en_content_id");
           boolean wantEn = "en".equalsIgnoreCase(lang);
-          boolean fallback = wantEn && !hasEn;
+          boolean fallbackLang = wantEn && enContentId == null; // 영문 미보유 → 국문 폴백
+          String effLang = wantEn && !fallbackLang ? "en" : "ko";
+          String contentId = "en".equals(effLang) ? enContentId : rs.getString("tour_content_id");
           var last = rs.getObject("last_departure_time", LocalTime.class);
-          // TourAPI 런타임 연동 전(후속 태스크) — 폴백형 고정. "이유 없는 빈칸" 금지: 이유+시각 필수.
-          Map<String, Object> detail = new java.util.LinkedHashMap<>();
-          detail.put("source", "FALLBACK");
-          detail.put("intro", rs.getString("intro_text"));
-          detail.put("reason", "관광정보 확인 실패");
-          detail.put("checkedAt", Instant.now().toString());
+          Map<String, Object> detail =
+              tourApi.detail(contentId, effLang, rs.getString("intro_text"));
           return new PoiDetailRes(rs.getLong("poi_id"), rs.getString("poi_name"),
               rs.getString("poi_kind"), rs.getString("tier"),
-              fallback || !wantEn ? "ko" : "en", fallback, detail,
+              effLang, fallbackLang, detail,
               rs.getString("check_url"),
               last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")));
         }, poiId);
