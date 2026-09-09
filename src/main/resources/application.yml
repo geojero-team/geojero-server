@@ -13,6 +13,10 @@ cors:
     - https://geojero-client.vercel.app
     - https://geojero-client-*.vercel.app
 
+logging:
+  pattern:
+    correlation: "[%X{traceId:-................}] "
+
 management:
   endpoints:
     web:
