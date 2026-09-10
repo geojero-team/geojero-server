@@ -11,3 +11,9 @@ spring:
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+tour:
+  info-key: ${TOUR_INFO_KEY}
+  info-base-url: https://apis.data.go.kr/B551011/KorService2
+  photo-key: ${TOUR_PHOTO_KEY}
+  photo-base-url: https://apis.data.go.kr/B551011/PhotoGalleryService1
