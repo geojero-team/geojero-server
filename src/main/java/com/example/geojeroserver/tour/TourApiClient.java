@@ -47,12 +47,18 @@ public class TourApiClient {
       Map<String, Object> detail = new LinkedHashMap<>();
       detail.put("source", "TourAPI");
       detail.put("overview", d.overview());                            // 원문 무수정
-      detail.put("imageUrl", "en".equals(lang) ? null : d.imageUrl()); // 영문 이미지 [미확인] 보류
+      // 영문 이미지는 [미확인] 보류. http로 오는 URL이 섞여 있어 https로 올린다 —
+      // 화면이 https라 http 이미지는 브라우저가 혼합 콘텐츠로 막고 빈칸만 남는다.
+      detail.put("imageUrl", "en".equals(lang) ? null : https(d.imageUrl()));
       cache.put(key, new CacheEntry(detail, System.currentTimeMillis()));
       return detail;
     } catch (Exception e) {
       return fallback(introFallback);
     }
+  }
+
+  private static String https(String url) {
+    return url != null && url.startsWith("http://") ? "https://" + url.substring(7) : url;
   }
 
   private static Map<String, Object> fallback(String intro) {
