@@ -13,8 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class PoiController {
+  // lat·lng는 좌표 미확보 POI가 있어 nullable(Double). 0.0으로 떨어지면 지도에 유령 핀이 찍힌다.
   public record PoiListItem(long poiId, String name, String kind, String tier,
-                            boolean hasEnglish) {}
+                            boolean hasEnglish, Double lat, Double lng) {}
   public record PoisRes(List<PoiListItem> pois) {}
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
@@ -34,10 +35,12 @@ public class PoiController {
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier,
                EXISTS(SELECT 1 FROM poi_i18n i
                       WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
-                        AND i.matched_by = 'HUMAN') AS has_en
+                        AND i.matched_by = 'HUMAN') AS has_en,
+               p.lat, p.lng
         FROM pois p ORDER BY p.poi_id""",
         (rs, i) -> new PoiListItem(rs.getLong(1), rs.getString(2), rs.getString(3),
-            rs.getString(4), rs.getBoolean(5))));
+            rs.getString(4), rs.getBoolean(5),
+            rs.getObject(6, Double.class), rs.getObject(7, Double.class))));
   }
 
   @GetMapping("/api/pois/{poiId}")
