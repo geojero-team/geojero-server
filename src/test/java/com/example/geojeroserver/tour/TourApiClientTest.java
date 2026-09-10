@@ -2,6 +2,7 @@ package com.example.geojeroserver.tour;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -69,5 +70,79 @@ class TourApiClientTest {
     var d = client.detail(null, "ko", "폴백문");
     assertEquals("FALLBACK", d.get("source"));
     assertEquals(0, calls.get());
+  }
+
+  /** 사진 저작권은 POI가 아니라 장 단위다 — 도장포처럼 대표만 Type3인 곳을 살린다. */
+  @Test void 사진목록은_Type3만_빼고_중복도_지운다() {
+    var client = new TourApiClient(
+        new TourApiGateway() {
+          @Override public TourDetail fetch(String service, String id) {
+            return new TourDetail("개요", "http://a.jpg", "Type1");
+          }
+          @Override public List<TourApiGateway.TourImage> images(String service, String id) {
+            return List.of(
+                new TourImage("http://a.jpg", "Type1"),   // 대표와 같은 장 → 하나로
+                new TourImage("http://b.jpg", "Type3"),   // 제3자 저작권 → 보류
+                new TourImage("http://c.jpg", "Type1"),
+                new TourImage(null, "Type1"));            // 빈 URL → 버림
+          }
+        },
+        () -> true);
+    assertEquals(List.of("https://a.jpg", "https://c.jpg"), client.images("127182", "ko"));
+  }
+
+  @Test void 대표사진이_Type3면_소개는_남기고_사진만_뺀다() {
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요 원문", "http://x.jpg", "Type3"),
+        () -> true);
+    var d = client.detail("129508", "ko", null);
+    assertEquals("TourAPI", d.get("source"));
+    assertEquals("개요 원문", d.get("overview")); // 저작권은 사진 얘기지 글 얘기가 아니다
+    assertNull(d.get("imageUrl"));
+  }
+
+  @Test void 사진조회가_실패해도_빈목록일뿐_예외가_새지않는다() {
+    var client = new TourApiClient(
+        new TourApiGateway() {
+          @Override public TourDetail fetch(String service, String id) {
+            return new TourDetail("개요", null);
+          }
+          @Override public List<TourApiGateway.TourImage> images(String service, String id) {
+            throw new IllegalStateException("TourAPI HTTP 500");
+          }
+        },
+        () -> true);
+    assertEquals(List.of(), client.images("129479", "ko"));
+  }
+
+  @Test void 사진도_캐시된다_두번불러도_한번만_호출() {
+    var calls = new AtomicInteger();
+    var client = new TourApiClient(
+        new TourApiGateway() {
+          @Override public TourDetail fetch(String service, String id) {
+            return new TourDetail("개요", null);
+          }
+          @Override public List<TourApiGateway.TourImage> images(String service, String id) {
+            calls.incrementAndGet();
+            return List.of(new TourImage("https://a.jpg", "Type1"));
+          }
+        },
+        () -> true);
+    assertEquals(client.images("129479", "ko"), client.images("129479", "ko"));
+    assertEquals(1, calls.get());
+  }
+
+  @Test void 영문사진은_보류라_호출도_카운터도_소모없음() {
+    var client = new TourApiClient(
+        new TourApiGateway() {
+          @Override public TourDetail fetch(String service, String id) {
+            return new TourDetail("overview", null);
+          }
+          @Override public List<TourApiGateway.TourImage> images(String service, String id) {
+            throw new AssertionError("영문은 부르면 안 됨");
+          }
+        },
+        () -> { throw new AssertionError("카운터를 건드리면 안 됨"); });
+    assertEquals(List.of(), client.images("1875200", "en"));
   }
 }
