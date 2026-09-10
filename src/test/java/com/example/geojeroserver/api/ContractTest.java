@@ -43,10 +43,11 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[0].region").value("남부권"))
         .andExpect(jsonPath("$.pois[0].category").value("언덕·전망"))
         .andExpect(jsonPath("$.pois[0].lat").value(34.7440458))
-        // 화면 이름은 정식 명칭보다 짧다 — 카드·핀 라벨이 이걸 쓴다
-        .andExpect(jsonPath("$.pois[1].shortName").value("도장포"))
-        .andExpect(jsonPath("$.pois[3].shortName").value("학동"))
-        .andExpect(jsonPath("$.pois[4].shortName").value("외도"))
+        // 화면 이름(카드·핀 라벨). V7에서 "짧게"보다 "혼동 없게"로 옮겼다 —
+        // '외도'는 섬, '학동'·'도장포'는 마을 이름이라 그 자체로 다른 것을 가리켰다.
+        .andExpect(jsonPath("$.pois[1].shortName").value("도장포유람선"))
+        .andExpect(jsonPath("$.pois[3].shortName").value("학동몽돌해변"))
+        .andExpect(jsonPath("$.pois[4].shortName").value("외도보타니아"))
         .andExpect(jsonPath("$.pois[4].category").value("식물원 · 유람선"))
         .andExpect(jsonPath("$.pois[6].theme").value("CASTLE"))
         .andExpect(jsonPath("$.pois[9].theme").value("GARDEN"))
