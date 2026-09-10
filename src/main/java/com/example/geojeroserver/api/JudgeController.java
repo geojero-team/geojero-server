@@ -25,7 +25,7 @@ public class JudgeController {
     this.snapshots = snapshots;
   }
 
-  static List<Leg> toEngineLegs(List<LegReq> legs) {
+  public static List<Leg> toEngineLegs(List<LegReq> legs) {
     return legs.stream().<Leg>map(l -> "FIXED".equals(l.type())
         ? new Leg.Fixed(l.endStop(), TimeUtil.hhmmToMin(l.endTime()))
         : new Leg.Bus(l.from(), l.to(), Boolean.TRUE.equals(l.boardOnly()))).toList();

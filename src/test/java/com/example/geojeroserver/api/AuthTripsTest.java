@@ -192,4 +192,77 @@ class AuthTripsTest {
              "arrivalTime":"08:20","returnTime":"21:10"}"""))
         .andExpect(status().isBadRequest());
   }
+
+  /**
+   * V10 — 사용자가 스팟을 골라 조립한 코스도 저장된다.
+   *
+   * 이전에는 course_id NOT NULL이라 검증 코스 3종만 저장됐고, 화면이 만든 코스에는
+   * 붙일 이름표가 없어 저장 버튼이 막혀 있었다. 이 케이스가 그 회귀를 지킨다.
+   */
+  @Test
+  void 고른_스팟으로_조립한_코스_저장_목록_삭제() throws Exception {
+    Long uid = jdbc.queryForObject("""
+        INSERT INTO users (provider, oauth_id) VALUES ('KAKAO', ?)
+        ON CONFLICT (provider, oauth_id) DO UPDATE SET updated_at = now()
+        RETURNING user_id""", Long.class, OAUTH_ID);
+    var cookie = new Cookie("gj_session", sessions.issue(uid).getValue());
+
+    var save = mvc.perform(post("/api/saved-trips").cookie(cookie)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {"legs":[{"type":"BUS","from":"고현","to":"학동"},
+                         {"type":"BUS","from":"학동","to":"고현"}],
+                 "title":"부산서부 → 거제 · 학동",
+                 "chain":"부산서부 → 고현 → 학동 → 고현 → 부산서부",
+                 "travelDate":"2026-09-09","arrivalTime":"08:20","returnTime":"21:10"}"""))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.courseId").doesNotExist())
+        .andExpect(jsonPath("$.title").value("부산서부 → 거제 · 학동"))
+        .andExpect(jsonPath("$.verdictAtSave.dayClass").value("WEEKDAY"))
+        .andReturn();
+    long id = new ObjectMapper()
+        .readTree(save.getResponse().getContentAsString(StandardCharsets.UTF_8))
+        .path("savedTripId").asLong();
+
+    // 목록에서 재판정이 돈다 — legs를 저장했기 때문에 오늘 기준으로 다시 계산할 수 있다.
+    mvc.perform(get("/api/saved-trips").cookie(cookie))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].savedTripId").value(id))
+        .andExpect(jsonPath("$[0].chain").value("부산서부 → 고현 → 학동 → 고현 → 부산서부"))
+        .andExpect(jsonPath("$[0].verdictNow.feasible").isString());
+
+    mvc.perform(delete("/api/saved-trips/" + id).cookie(cookie))
+        .andExpect(status().isNoContent());
+  }
+
+  /** courseId와 legs는 정확히 하나여야 한다 — 둘 다 없으면 판정할 근거가 없다. */
+  @Test
+  void 저장_courseId도_legs도_없으면_400() throws Exception {
+    Long uid = jdbc.queryForObject("""
+        INSERT INTO users (provider, oauth_id) VALUES ('KAKAO', ?)
+        ON CONFLICT (provider, oauth_id) DO UPDATE SET updated_at = now()
+        RETURNING user_id""", Long.class, OAUTH_ID);
+    var cookie = new Cookie("gj_session", sessions.issue(uid).getValue());
+    mvc.perform(post("/api/saved-trips").cookie(cookie)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"travelDate":"2026-09-09","arrivalTime":"08:20","returnTime":"21:10"}"""))
+        .andExpect(status().isBadRequest());
+  }
+
+  /** 모르는 정류소가 섞이면 저장을 만들지 않는다 — 재판정이 영원히 실패하는 행을 남기지 않는다. */
+  @Test
+  void 저장_판정불가_구간이면_400() throws Exception {
+    Long uid = jdbc.queryForObject("""
+        INSERT INTO users (provider, oauth_id) VALUES ('KAKAO', ?)
+        ON CONFLICT (provider, oauth_id) DO UPDATE SET updated_at = now()
+        RETURNING user_id""", Long.class, OAUTH_ID);
+    var cookie = new Cookie("gj_session", sessions.issue(uid).getValue());
+    mvc.perform(post("/api/saved-trips").cookie(cookie)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"legs":[{"type":"FIXED","endStop":"고현","endTime":"없는시각"}],
+             "travelDate":"2026-09-09","arrivalTime":"08:20","returnTime":"21:10"}"""))
+        .andExpect(status().isBadRequest());
+  }
 }

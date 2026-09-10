@@ -14,7 +14,7 @@ public class CourseController {
   public record CourseJudgeReq(String date, String arrivalTime, String returnTime) {}
 
   /** §3 검증 코스 3종 — 확정 데이터 기반 상수. DB 동기화는 CourseSeeder(saved_trips FK 원천). */
-  static final List<CourseDto> COURSES = List.of(
+  public static final List<CourseDto> COURSES = List.of(
       new CourseDto(1, "부산발 당일치기", "ISLAND",
           "사상 07:00 → 바람의언덕·유람선 → 막차 복귀 → 부산행 21:10"),
       new CourseDto(2, "서울발 무박 일출", "NATURE",

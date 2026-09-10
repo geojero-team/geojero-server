@@ -38,10 +38,21 @@ public class CourseJudgeService {
     if (!hasCourse(courseId)) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "존재하지 않는 코스: " + courseId);
     }
+    return judgeLegs(COURSE_LEGS.get(courseId), date, arrivalTime, returnTime);
+  }
+
+  /**
+   * 사용자가 고른 스팟으로 조립된 코스를 판정한다 — 저장 일정(saved_trips.legs)이 쓴다.
+   *
+   * 검증 코스와 **같은 규칙**으로 판정한다: 거제 도착 앵커 → 구간들 → 귀환 검사.
+   * 그래야 '내 일정'에 나란히 놓인 두 종류가 같은 뜻의 판정을 갖는다.
+   */
+  public JudgeController.JudgeRes judgeLegs(List<Leg> courseLegs, String date,
+      String arrivalTime, String returnTime) {
     var snap = snapshots.forDate(date);
     var legs = new ArrayList<Leg>();
     legs.add(new Leg.Fixed("고현", TimeUtil.hhmmToMin(arrivalTime))); // 거제 도착 앵커
-    legs.addAll(COURSE_LEGS.get(courseId));
+    legs.addAll(courseLegs);
     var r = Judge.judge(snap, legs, 0);
 
     // 귀환 검사: 마지막 도착(고현)이 예매한 귀환편 이전인가
