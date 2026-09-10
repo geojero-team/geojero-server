@@ -18,7 +18,7 @@ public class HttpKakaoGateway implements KakaoGateway {
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
   private final ObjectMapper om = new ObjectMapper();
 
-  @Value("${KAKAO_REST_KEY:}")
+  @Value("${KAKAO_CLIENT_ID:}")
   String restKey;
 
   @Value("${KAKAO_CLIENT_SECRET:}")
