@@ -36,7 +36,7 @@ class ContractTest {
   @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(12)) // V6에서 명사해수욕장 추가
+        .andExpect(jsonPath("$.pois.length()").value(13)) // V6 명사해수욕장 + V9 포로수용소
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
@@ -59,14 +59,20 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[11].name").value("명사해수욕장"))
         .andExpect(jsonPath("$.pois[11].theme").value("BEACH"))
         .andExpect(jsonPath("$.pois[11].region").value("남부권"))
-        .andExpect(jsonPath("$.pois[11].lat").value(34.7272514));
+        .andExpect(jsonPath("$.pois[11].lat").value(34.7272514))
+        // V9 — 거제 9경 중 유일하게 고현(진입 관문)에 있는 스팟. 화면 스팟이 전부
+        // 외곽이던 자리를 메운다. 사진은 대표·추가 7장이 전부 Type1이라 그대로 쓴다.
+        .andExpect(jsonPath("$.pois[12].name").value("거제도포로수용소유적공원"))
+        .andExpect(jsonPath("$.pois[12].shortName").value("포로수용소"))
+        .andExpect(jsonPath("$.pois[12].tier").value("BEST"))
+        .andExpect(jsonPath("$.pois[12].lat").value(34.8764184));
   }
 
   /** withImages는 POI마다 TourAPI를 부른다. 키가 없거나 실패해도 목록 자체는 성립해야 한다. */
   @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
     mvc.perform(get("/api/pois?withImages=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(12))
+        .andExpect(jsonPath("$.pois.length()").value(13))
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
   }
 
