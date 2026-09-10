@@ -25,6 +25,13 @@ public class HttpKakaoGateway implements KakaoGateway {
   String clientSecret;
 
   @Override
+  public String authorizeUrl(String redirectUri) {
+    if (restKey == null || restKey.isBlank()) return null;
+    return "https://kauth.kakao.com/oauth/authorize?response_type=code"
+        + "&client_id=" + enc(restKey) + "&redirect_uri=" + enc(redirectUri);
+  }
+
+  @Override
   public KakaoUser exchange(String code, String redirectUri) throws Exception {
     String form = "grant_type=authorization_code"
         + "&client_id=" + enc(restKey) + "&redirect_uri=" + enc(redirectUri)

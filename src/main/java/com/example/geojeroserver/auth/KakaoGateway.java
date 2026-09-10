@@ -8,4 +8,10 @@ public interface KakaoGateway {
   record KakaoUser(String oauthId, String nickname) {}
 
   KakaoUser exchange(String code, String redirectUri) throws Exception;
+
+  /**
+   * 카카오 인증 화면 주소. REST 키가 없으면 null — 로그인만 못 하고 나머지는 그대로 돈다.
+   * 키를 클라이언트에 내보내지 않으려고 서버가 만든다.
+   */
+  String authorizeUrl(String redirectUri);
 }

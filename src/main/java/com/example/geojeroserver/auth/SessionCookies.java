@@ -13,6 +13,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 public class SessionCookies {
   static final String NAME = "gj_session";
+  private static final String BEARER = "Bearer ";
   private static final long TTL_SEC = 7 * 24 * 3600;
 
   private final byte[] key;
@@ -40,10 +42,22 @@ public class SessionCookies {
     }
   }
 
-  public ResponseCookie issue(long userId) {
+  /**
+   * 쿠키에 담는 값과 같은 토큰.
+   *
+   * 프론트(vercel.app)와 API(api.geojero.com)가 다른 사이트인 동안은 SameSite=Lax 쿠키가
+   * 저장도 전송도 되지 않는다. SameSite=None 으로 열면 사파리가 서드파티 쿠키를 막는다.
+   * 그래서 같은 토큰을 응답 본문으로도 내보내고 Authorization: Bearer 로 받는다.
+   * 같은 사이트가 되면 쿠키가 먼저 잡히므로(verify 순서) 코드를 고칠 필요가 없다.
+   */
+  public String issueToken(long userId) {
     long exp = Instant.now().getEpochSecond() + TTL_SEC;
     String payload = userId + "." + exp;
-    return ResponseCookie.from(NAME, payload + "." + sign(payload))
+    return payload + "." + sign(payload);
+  }
+
+  public ResponseCookie issue(long userId) {
+    return ResponseCookie.from(NAME, issueToken(userId))
         .httpOnly(true).sameSite("Lax").path("/")
         .maxAge(Duration.ofSeconds(TTL_SEC)).build();
   }
@@ -53,24 +67,36 @@ public class SessionCookies {
         .httpOnly(true).sameSite("Lax").path("/").maxAge(0).build();
   }
 
-  /** 검증 실패는 null — 401 변환은 require()가 한다. */
+  /**
+   * 검증 실패는 null — 401 변환은 require()가 한다.
+   * 쿠키를 먼저 보고, 없으면 Authorization: Bearer 를 본다. 같은 사이트가 되면 쿠키가 이긴다.
+   */
   public Long verify(HttpServletRequest req) {
-    if (req.getCookies() == null) return null;
-    for (Cookie c : req.getCookies()) {
-      if (!NAME.equals(c.getName())) continue;
-      String[] p = c.getValue().split("\\.");
-      if (p.length != 3) return null;
-      try {
-        long userId = Long.parseLong(p[0]);
-        if (Long.parseLong(p[1]) < Instant.now().getEpochSecond()) return null;
-        byte[] expect = signBytes(p[0] + "." + p[1]);
-        byte[] got = HexFormat.of().parseHex(p[2]);
-        return MessageDigest.isEqual(expect, got) ? userId : null;
-      } catch (RuntimeException e) {
-        return null;
+    if (req.getCookies() != null) {
+      for (Cookie c : req.getCookies()) {
+        if (NAME.equals(c.getName())) return validate(c.getValue());
       }
     }
+    String auth = req.getHeader(HttpHeaders.AUTHORIZATION);
+    if (auth != null && auth.startsWith(BEARER)) {
+      return validate(auth.substring(BEARER.length()).trim());
+    }
     return null;
+  }
+
+  private Long validate(String token) {
+    if (token == null) return null;
+    String[] p = token.split("\\.");
+    if (p.length != 3) return null;
+    try {
+      long userId = Long.parseLong(p[0]);
+      if (Long.parseLong(p[1]) < Instant.now().getEpochSecond()) return null;
+      byte[] expect = signBytes(p[0] + "." + p[1]);
+      byte[] got = HexFormat.of().parseHex(p[2]);
+      return MessageDigest.isEqual(expect, got) ? userId : null;
+    } catch (RuntimeException e) {
+      return null;
+    }
   }
 
   public long require(HttpServletRequest req) {

@@ -65,6 +65,58 @@ class AuthTripsTest {
   }
 
   @Test
+  void 위조_Bearer_401() throws Exception {
+    mvc.perform(get("/api/me").header("Authorization", "Bearer 1.9999999999.deadbeef"))
+        .andExpect(status().isUnauthorized());
+  }
+
+  /**
+   * 프론트(vercel.app)와 API(api.geojero.com)가 다른 사이트인 동안 SameSite=Lax 쿠키는
+   * 브라우저에 저장되지 않는다. 같은 토큰을 Authorization: Bearer로 보내도 통해야 한다 —
+   * 이게 없으면 로그인이 200을 받고도 /api/me가 401이 되어 "로그인했는데 안 된" 상태가 된다.
+   */
+  @Test
+  void Bearer_토큰으로_사용자평면_왕복() throws Exception {
+    when(kakao.exchange("bearer-code", "http://localhost/cb"))
+        .thenReturn(new KakaoGateway.KakaoUser(OAUTH_ID, "테스트유저"));
+    var login = mvc.perform(post("/api/auth/kakao").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"code\":\"bearer-code\",\"redirectUri\":\"http://localhost/cb\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.token").isNotEmpty())
+        .andReturn();
+    String token = new ObjectMapper()
+        .readTree(login.getResponse().getContentAsString(StandardCharsets.UTF_8))
+        .path("token").asText();
+
+    // 쿠키를 아예 붙이지 않는다 — 교차 사이트 브라우저와 같은 조건
+    mvc.perform(get("/api/me").header("Authorization", "Bearer " + token))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.nickname").value("테스트유저"));
+    mvc.perform(get("/api/saved-trips").header("Authorization", "Bearer " + token))
+        .andExpect(status().isOk());
+  }
+
+  /** REST 키가 없으면 로그인 시작만 503이고 판정·조회는 계속 돈다. */
+  @Test
+  void 카카오_미설정이면_start만_503() throws Exception {
+    when(kakao.authorizeUrl(anyString())).thenReturn(null);
+    mvc.perform(get("/api/auth/kakao/start?redirectUri=http://localhost/cb"))
+        .andExpect(status().isServiceUnavailable());
+    mvc.perform(get("/api/pois")).andExpect(status().isOk());
+  }
+
+  @Test
+  void 카카오_설정되면_start가_kauth로_302() throws Exception {
+    when(kakao.authorizeUrl("http://localhost/cb"))
+        .thenReturn("https://kauth.kakao.com/oauth/authorize?response_type=code"
+            + "&client_id=KEY&redirect_uri=http%3A%2F%2Flocalhost%2Fcb");
+    mvc.perform(get("/api/auth/kakao/start?redirectUri=http://localhost/cb"))
+        .andExpect(status().isFound())
+        .andExpect(header().string("Location",
+            Matchers.startsWith("https://kauth.kakao.com/oauth/authorize")));
+  }
+
+  @Test
   void 카카오_장애시_로그인만_502_판정은_정상() throws Exception {
     when(kakao.exchange(anyString(), anyString()))
         .thenThrow(new IllegalStateException("kauth HTTP 500"));
