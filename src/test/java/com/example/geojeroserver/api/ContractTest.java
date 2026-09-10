@@ -28,6 +28,41 @@ class ContractTest {
     }
   }
 
+  /**
+   * 화면 분류가 실제로 응답에 실리는지. 컬럼만 만들고 값이 안 들어가면 스팟 목록·카테고리 필터·
+   * 지도 핀이 조용히 빈다 — 컴파일로도 DB 없는 테스트로도 안 잡히는 자리다.
+   * 순서는 V3가 seq로 못박은 poi_id를 따른다(index = poi_id - 1).
+   */
+  @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois.length()").value(11))
+        .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
+        .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
+        .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
+        .andExpect(jsonPath("$.pois[0].region").value("남부권"))
+        .andExpect(jsonPath("$.pois[0].category").value("언덕·전망"))
+        .andExpect(jsonPath("$.pois[0].lat").value(34.7440458))
+        // 화면 이름은 정식 명칭보다 짧다 — 카드·핀 라벨이 이걸 쓴다
+        .andExpect(jsonPath("$.pois[1].shortName").value("도장포"))
+        .andExpect(jsonPath("$.pois[3].shortName").value("학동"))
+        .andExpect(jsonPath("$.pois[4].shortName").value("외도"))
+        .andExpect(jsonPath("$.pois[4].category").value("식물원 · 유람선"))
+        .andExpect(jsonPath("$.pois[6].theme").value("CASTLE"))
+        .andExpect(jsonPath("$.pois[9].theme").value("GARDEN"))
+        // Figma가 분류한 적 없는 POI는 null이다 — 없는 분류를 만들지 않는다(절대 규칙 1)
+        .andExpect(jsonPath("$.pois[5].theme").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.pois[7].theme").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  /** withImages는 POI마다 TourAPI를 부른다. 키가 없거나 실패해도 목록 자체는 성립해야 한다. */
+  @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
+    mvc.perform(get("/api/pois?withImages=true"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois.length()").value(11))
+        .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
+  }
+
   @Test void 시간표_55번_고현발6회_막차1915_SKIP노출() throws Exception {
     mvc.perform(get("/api/routes/55/timetable?date=2026-09-09"))
         .andExpect(jsonPath("$.dayClass").value("WEEKDAY"))

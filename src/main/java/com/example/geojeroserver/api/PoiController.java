@@ -2,8 +2,10 @@ package com.example.geojeroserver.api;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 import com.example.geojeroserver.tour.TourApiClient;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,8 +16,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class PoiController {
   // lat·lng는 좌표 미확보 POI가 있어 nullable(Double). 0.0으로 떨어지면 지도에 유령 핀이 찍힌다.
-  public record PoiListItem(long poiId, String name, String kind, String tier,
-                            boolean hasEnglish, Double lat, Double lng) {}
+  // theme·region·category·shortName은 Figma가 분류한 POI만 값이 있고 나머지는 null이다.
+  // imageUrl은 withImages=true일 때만 채운다 — TourAPI 실호출이라 기본 경로를 느리게 하지 않는다.
+  public record PoiListItem(long poiId, String name, String shortName, String kind,
+                            String theme, String region, String category, String tier,
+                            boolean hasEnglish, Double lat, Double lng, String imageUrl) {}
+
+  /** 이미지를 채우는 데만 쓰는 원본 값. 응답에는 나가지 않는다. */
+  private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro) {}
   public record PoisRes(List<PoiListItem> pois) {}
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
@@ -35,17 +43,51 @@ public class PoiController {
   }
 
   @GetMapping("/api/pois")
-  public PoisRes list() {
-    return new PoisRes(jdbc.query("""
-        SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier,
+  public PoisRes list(@RequestParam(defaultValue = "false") boolean withImages) {
+    var rows = jdbc.query("""
+        SELECT p.poi_id, p.poi_name, p.short_name, p.poi_kind, p.theme, p.region,
+               p.category, p.tier,
                EXISTS(SELECT 1 FROM poi_i18n i
                       WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                         AND i.matched_by = 'HUMAN') AS has_en,
-               p.lat, p.lng
+               p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text
         FROM pois p ORDER BY p.poi_id""",
-        (rs, i) -> new PoiListItem(rs.getLong(1), rs.getString(2), rs.getString(3),
-            rs.getString(4), rs.getBoolean(5),
-            toDouble(rs.getBigDecimal(6)), toDouble(rs.getBigDecimal(7)))));
+        (rs, i) -> new Row(
+            new PoiListItem(rs.getLong("poi_id"), rs.getString("poi_name"),
+                rs.getString("short_name"), rs.getString("poi_kind"), rs.getString("theme"),
+                rs.getString("region"), rs.getString("category"), rs.getString("tier"),
+                rs.getBoolean("has_en"), toDouble(rs.getBigDecimal("lat")),
+                toDouble(rs.getBigDecimal("lng")), null),
+            rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
+            rs.getString("intro_text")));
+
+    if (!withImages) return new PoisRes(rows.stream().map(Row::item).toList());
+
+    // TourAPI는 POI마다 한 번씩 부른다. 순차로 돌면 첫 요청이 수십 초가 되므로 동시에 던진다.
+    // 캐시(24h)가 채워진 뒤에는 호출이 없다. 개별 실패는 이미지 없이 내보낸다 — 목록이 죽지 않는다.
+    List<PoiListItem> out = new ArrayList<>(rows.size());
+    try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+      var tasks = rows.stream().map(r -> exec.submit(() -> withImage(r))).toList();
+      for (int i = 0; i < rows.size(); i++) {
+        try {
+          out.add(tasks.get(i).get());
+        } catch (Exception e) {
+          out.add(rows.get(i).item());
+        }
+      }
+    }
+    return new PoisRes(out);
+  }
+
+  /** image_use_ok=false는 부르지도 않는다 — cpyrhtDivCd Type3 보류(기준문서 §9). */
+  private PoiListItem withImage(Row r) {
+    if (!r.imageUseOk() || r.contentId() == null || r.contentId().isBlank()) return r.item();
+    Object url = tourApi.detail(r.contentId(), "ko", r.intro()).get("imageUrl");
+    if (url == null) return r.item();
+    var it = r.item();
+    return new PoiListItem(it.poiId(), it.name(), it.shortName(), it.kind(), it.theme(),
+        it.region(), it.category(), it.tier(), it.hasEnglish(), it.lat(), it.lng(),
+        url.toString());
   }
 
   @GetMapping("/api/pois/{poiId}")
