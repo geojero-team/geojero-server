@@ -11,7 +11,10 @@ import org.springframework.stereotype.Component;
 
 /**
  * detailCommon2 실호출. 공모전 준수: areacode/sigungucode 미사용(상세 조회는 contentId 직접),
- * overview 원문 무수정, KTO 명칭·로고 미노출. 키는 TOURAPI_KEY 환경변수(.env)로만.
+ * overview 원문 무수정, KTO 명칭·로고 미노출. 키는 TOUR_INFO_KEY 환경변수(.env)로만.
+ *
+ * 기반 URL은 여기서 조립한다 — application-prod.yml 의 tour.info-base-url 은 KorService2 로
+ * 고정돼 있어 영문(EngService2) 분기를 못 한다. service 인자로 국문·영문을 가른다.
  */
 @Component
 public class HttpTourApiGateway implements TourApiGateway {
@@ -19,8 +22,13 @@ public class HttpTourApiGateway implements TourApiGateway {
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
   private final ObjectMapper om = new ObjectMapper();
 
-  @Value("${TOURAPI_KEY:}")
+  @Value("${TOUR_INFO_KEY:}")
   String serviceKey;
+
+  @Override
+  public boolean isConfigured() {
+    return serviceKey != null && !serviceKey.isBlank();
+  }
 
   @Override
   public TourDetail fetch(String service, String contentId) throws Exception {

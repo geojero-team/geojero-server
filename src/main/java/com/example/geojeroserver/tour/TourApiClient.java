@@ -28,9 +28,12 @@ public class TourApiClient {
     this.counter = counter;
   }
 
-  /** lang: "ko"|"en". contentId 없으면 호출·카운터 소모 없이 폴백. */
+  /** lang: "ko"|"en". contentId·키가 없으면 호출·카운터 소모 없이 폴백. */
   public Map<String, Object> detail(String contentId, String lang, String introFallback) {
     if (contentId == null || contentId.isBlank()) return fallback(introFallback);
+    // 키가 없으면 호출은 어차피 실패한다. 여기서 막지 않으면 실패가 카운터를 태우고,
+    // 실패는 캐시에도 안 남으므로 요청마다 반복된다 → 키를 나중에 넣어도 그날은 폴백만 나온다.
+    if (!gateway.isConfigured()) return fallback(introFallback);
     String service = "en".equals(lang) ? "EngService2" : "KorService2";
     String key = service + ":" + contentId;
     var hit = cache.get(key);

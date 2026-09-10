@@ -44,6 +44,23 @@ class TourApiClientTest {
     assertSame(d1, d2);
   }
 
+  @Test void 키가없으면_호출도_카운터도_소모없음() {
+    var calls = new AtomicInteger();
+    var client = new TourApiClient(
+        new TourApiGateway() {
+          @Override public TourDetail fetch(String service, String id) {
+            calls.incrementAndGet();
+            return new TourDetail("overview", null);
+          }
+          @Override public boolean isConfigured() { return false; } // TOURAPI_KEY 미설정
+        },
+        () -> { throw new AssertionError("카운터를 건드리면 안 됨"); });
+    var d = client.detail("129479", "ko", "자체 소개문");
+    assertEquals("FALLBACK", d.get("source"));
+    assertEquals("자체 소개문", d.get("intro"));
+    assertEquals(0, calls.get());
+  }
+
   @Test void contentId없으면_호출도_카운터도_소모없음() {
     var calls = new AtomicInteger();
     var client = new TourApiClient(
