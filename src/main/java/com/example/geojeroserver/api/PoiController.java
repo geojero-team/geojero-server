@@ -23,7 +23,8 @@ public class PoiController {
                             boolean hasEnglish, Double lat, Double lng, String imageUrl) {}
 
   /** 이미지를 채우는 데만 쓰는 원본 값. 응답에는 나가지 않는다. */
-  private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro) {}
+  private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro,
+                     String photoKeyword) {}
   public record PoisRes(List<PoiListItem> pois) {}
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
@@ -50,7 +51,8 @@ public class PoiController {
                EXISTS(SELECT 1 FROM poi_i18n i
                       WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                         AND i.matched_by = 'HUMAN') AS has_en,
-               p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text
+               p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text,
+               p.photo_keyword
         FROM pois p ORDER BY p.poi_id""",
         (rs, i) -> new Row(
             new PoiListItem(rs.getLong("poi_id"), rs.getString("poi_name"),
@@ -59,7 +61,7 @@ public class PoiController {
                 rs.getBoolean("has_en"), toDouble(rs.getBigDecimal("lat")),
                 toDouble(rs.getBigDecimal("lng")), null),
             rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
-            rs.getString("intro_text")));
+            rs.getString("intro_text"), rs.getString("photo_keyword")));
 
     if (!withImages) return new PoisRes(rows.stream().map(Row::item).toList());
 
@@ -79,15 +81,27 @@ public class PoiController {
     return new PoisRes(out);
   }
 
-  /** image_use_ok=false는 부르지도 않는다 — cpyrhtDivCd Type3 보류(기준문서 §9). */
+  /**
+   * image_use_ok=false는 부르지도 않는다 — 사람이 끈 POI다(기준문서 §9).
+   *
+   * 대표 사진이 Type3라 비면 관광사진 API로 한 번 더 찾는다. 도장포유람선처럼 KorService2
+   * 사진이 전 장 Type3인 곳은 이게 없으면 카드도 지도 핀도 영영 회색이다.
+   */
   private PoiListItem withImage(Row r) {
-    if (!r.imageUseOk() || r.contentId() == null || r.contentId().isBlank()) return r.item();
-    Object url = tourApi.detail(r.contentId(), "ko", r.intro()).get("imageUrl");
+    if (!r.imageUseOk()) return r.item();
+    String url = null;
+    if (r.contentId() != null && !r.contentId().isBlank()) {
+      Object first = tourApi.detail(r.contentId(), "ko", r.intro()).get("imageUrl");
+      if (first != null) url = first.toString();
+    }
+    if (url == null) {
+      var photos = tourApi.galleryPhotos(r.photoKeyword());
+      if (!photos.isEmpty()) url = photos.get(0);
+    }
     if (url == null) return r.item();
     var it = r.item();
     return new PoiListItem(it.poiId(), it.name(), it.shortName(), it.kind(), it.theme(),
-        it.region(), it.category(), it.tier(), it.hasEnglish(), it.lat(), it.lng(),
-        url.toString());
+        it.region(), it.category(), it.tier(), it.hasEnglish(), it.lat(), it.lng(), url);
   }
 
   @GetMapping("/api/pois/{poiId}")
@@ -95,7 +109,7 @@ public class PoiController {
       @RequestParam(defaultValue = "ko") String lang) {
     return jdbc.queryForObject("""
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
-               p.last_departure_time, p.tour_content_id, p.image_use_ok,
+               p.last_departure_time, p.tour_content_id, p.image_use_ok, p.photo_keyword,
                (SELECT i.tour_content_id FROM poi_i18n i
                  WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                    AND i.matched_by = 'HUMAN') AS en_content_id
@@ -115,6 +129,12 @@ public class PoiController {
           List<String> extra = useOk && "TourAPI".equals(detail.get("source"))
               ? tourApi.images(contentId, effLang)
               : List.of();
+          // KorService2에서 쓸 사진이 한 장도 안 나오면(전 장 Type3) 관광사진 API로
+          // 대신 찾는다 — 공공누리 제1유형이라 출처만 밝히면 쓸 수 있다.
+          if (useOk && extra.isEmpty() && detail.get("imageUrl") == null
+              && !"en".equals(effLang)) {
+            extra = tourApi.galleryPhotos(rs.getString("photo_keyword"));
+          }
           return new PoiDetailRes(rs.getLong("poi_id"), rs.getString("poi_name"),
               rs.getString("poi_kind"), rs.getString("tier"),
               effLang, fallbackLang, withPhotos(detail, useOk, extra),

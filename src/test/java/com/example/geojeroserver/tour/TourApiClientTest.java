@@ -132,6 +132,52 @@ class TourApiClientTest {
     assertEquals(1, calls.get());
   }
 
+  /**
+   * 관광사진은 키워드 검색이라 남의 사진이 섞여 온다. 실제로 '도장포'로 찾으면 인근
+   * 바람의언덕 사진이 딸려 오고, '신선대'로 찾으면 부산 신선대가 나온다(2026-09-10 실측).
+   * 걸러내지 못하면 엉뚱한 곳 사진을 그 스팟이라고 내보이게 된다.
+   */
+  @Test void 관광사진은_제목과_촬영지_둘다_맞아야_쓴다() {
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요", null),
+        keyword -> List.of(
+            new PhotoGalleryGateway.GalleryPhoto(
+                "도장포 유람선선착장", "경상남도 거제시 남부면", "http://a.jpg"),
+            new PhotoGalleryGateway.GalleryPhoto(   // 제목에 키워드가 없다 — 인근의 남의 사진
+                "거제 바람의 언덕", "경상남도 거제시 남부면", "http://b.jpg"),
+            new PhotoGalleryGateway.GalleryPhoto(   // 거제가 아니다 — 같은 이름 다른 고장
+                "도장포 선착장", "부산광역시 남구", "http://c.jpg"),
+            new PhotoGalleryGateway.GalleryPhoto(
+                "도장포 마을", "경상남도 거제시", "http://d.jpg")),
+        () -> true);
+    assertEquals(List.of("https://a.jpg", "https://d.jpg"), client.galleryPhotos("도장포"));
+  }
+
+  @Test void 관광사진_키가없으면_호출도_카운터도_소모없음() {
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요", null),
+        new PhotoGalleryGateway() {
+          @Override public List<GalleryPhoto> search(String keyword) {
+            throw new AssertionError("키가 없으면 부르면 안 됨");
+          }
+          @Override public boolean isConfigured() { return false; }
+        },
+        () -> { throw new AssertionError("카운터를 건드리면 안 됨"); });
+    assertEquals(List.of(), client.galleryPhotos("도장포"));
+  }
+
+  /** 0건도 캐시한다 — 없는 걸 확인하려고 매 요청 한도를 태우면 안 된다(명사해수욕장). */
+  @Test void 관광사진_0건도_캐시되어_두번째는_호출없음() {
+    var calls = new AtomicInteger();
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요", null),
+        keyword -> { calls.incrementAndGet(); return List.of(); },
+        () -> true);
+    assertEquals(List.of(), client.galleryPhotos("명사"));
+    assertEquals(List.of(), client.galleryPhotos("명사"));
+    assertEquals(1, calls.get());
+  }
+
   @Test void 영문사진은_보류라_호출도_카운터도_소모없음() {
     var client = new TourApiClient(
         new TourApiGateway() {

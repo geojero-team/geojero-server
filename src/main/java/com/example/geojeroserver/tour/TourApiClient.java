@@ -23,14 +23,27 @@ public class TourApiClient {
 
   private record ImageEntry(List<String> urls, long at) {}
 
+  /** 촬영지에 이걸 포함하는 사진만 쓴다 — '신선대'는 부산에도 있다. */
+  private static final String REGION = "거제";
+
   private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
   private final Map<String, ImageEntry> imageCache = new ConcurrentHashMap<>();
   private final TourApiGateway gateway;
+  private final PhotoGalleryGateway photoGateway;
   private final CallCounter counter;
 
-  public TourApiClient(TourApiGateway gateway, CallCounter counter) {
+  // 생성자가 둘이라 어느 쪽을 쓸지 Spring에 알려줘야 한다 — 없으면 기본 생성자를 찾다 죽는다.
+  @org.springframework.beans.factory.annotation.Autowired
+  public TourApiClient(TourApiGateway gateway, PhotoGalleryGateway photoGateway,
+      CallCounter counter) {
     this.gateway = gateway;
+    this.photoGateway = photoGateway;
     this.counter = counter;
+  }
+
+  /** 사진 갤러리를 안 보는 호출부(대부분의 테스트)용. */
+  public TourApiClient(TourApiGateway gateway, CallCounter counter) {
+    this(gateway, keyword -> java.util.List.of(), counter);
   }
 
   /** lang: "ko"|"en". contentId·키가 없으면 호출·카운터 소모 없이 폴백. */
@@ -90,6 +103,40 @@ public class TourApiClient {
         if (!urls.contains(u)) urls.add(u);
       }
       var frozen = List.copyOf(urls);
+      imageCache.put(key, new ImageEntry(frozen, System.currentTimeMillis()));
+      return frozen;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
+  /**
+   * 관광사진 API 폴백. KorService2 사진이 전 장 Type3라 하나도 못 쓰는 POI를 위한 것이다
+   * (도장포유람선·신선대). 이쪽은 공공누리 제1유형이라 출처만 밝히면 쓸 수 있다.
+   *
+   * 키워드 검색이라 남의 사진이 섞인다 — '도장포'로 찾으면 인근 바람의언덕 사진이 7장
+   * 딸려 오고, '신선대'로 찾으면 부산 신선대가 나온다. 그래서 **제목에 키워드가 들어가고
+   * 촬영지가 거제인 것**만 남긴다. 둘 중 하나라도 없으면 엉뚱한 곳 사진을 그 스팟이라고
+   * 내보이게 된다.
+   */
+  public List<String> galleryPhotos(String keyword) {
+    if (keyword == null || keyword.isBlank()) return List.of();
+    if (!photoGateway.isConfigured()) return List.of();
+    String key = "PHOTO:" + keyword;
+    var hit = imageCache.get(key);
+    if (hit != null && System.currentTimeMillis() - hit.at() < TTL_MS) return hit.urls();
+    if (!counter.tryAcquire()) return List.of();
+    try {
+      List<String> urls = new ArrayList<>();
+      for (var p : photoGateway.search(keyword)) {
+        if (p.imageUrl() == null || p.imageUrl().isBlank()) continue;
+        if (p.title() == null || !p.title().contains(keyword)) continue;
+        if (p.location() == null || !p.location().contains(REGION)) continue;
+        String u = https(p.imageUrl());
+        if (!urls.contains(u)) urls.add(u);
+      }
+      var frozen = List.copyOf(urls);
+      // 0건도 캐시한다 — 없는 걸 확인하려고 매 요청 카운터를 태우지 않는다.
       imageCache.put(key, new ImageEntry(frozen, System.currentTimeMillis()));
       return frozen;
     } catch (Exception e) {
