@@ -21,6 +21,11 @@ public class PoiController {
                              String lang, boolean langFallback, Map<String, Object> detail,
                              String checkUrl, String lastDeparture) {}
 
+  /** numeric → Double. PgJDBC는 getObject(n, Double.class)를 numeric에 대해 지원하지 않는다. */
+  private static Double toDouble(java.math.BigDecimal v) {
+    return v == null ? null : v.doubleValue();
+  }
+
   private final JdbcTemplate jdbc;
   private final TourApiClient tourApi;
 
@@ -40,7 +45,7 @@ public class PoiController {
         FROM pois p ORDER BY p.poi_id""",
         (rs, i) -> new PoiListItem(rs.getLong(1), rs.getString(2), rs.getString(3),
             rs.getString(4), rs.getBoolean(5),
-            rs.getObject(6, Double.class), rs.getObject(7, Double.class))));
+            toDouble(rs.getBigDecimal(6)), toDouble(rs.getBigDecimal(7)))));
   }
 
   @GetMapping("/api/pois/{poiId}")
