@@ -36,7 +36,7 @@ class ContractTest {
   @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(11))
+        .andExpect(jsonPath("$.pois.length()").value(12)) // V6에서 명사해수욕장 추가
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
@@ -52,14 +52,20 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[9].theme").value("GARDEN"))
         // Figma가 분류한 적 없는 POI는 null이다 — 없는 분류를 만들지 않는다(절대 규칙 1)
         .andExpect(jsonPath("$.pois[5].theme").value(org.hamcrest.Matchers.nullValue()))
-        .andExpect(jsonPath("$.pois[7].theme").value(org.hamcrest.Matchers.nullValue()));
+        .andExpect(jsonPath("$.pois[7].theme").value(org.hamcrest.Matchers.nullValue()))
+        // V6 — 화면 목록에는 있는데 시드에 없어 사진도 좌표도 못 받던 곳.
+        // contentId·좌표는 TourAPI searchKeyword2 실호출로 확인한 값이다.
+        .andExpect(jsonPath("$.pois[11].name").value("명사해수욕장"))
+        .andExpect(jsonPath("$.pois[11].theme").value("BEACH"))
+        .andExpect(jsonPath("$.pois[11].region").value("남부권"))
+        .andExpect(jsonPath("$.pois[11].lat").value(34.7272514));
   }
 
   /** withImages는 POI마다 TourAPI를 부른다. 키가 없거나 실패해도 목록 자체는 성립해야 한다. */
   @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
     mvc.perform(get("/api/pois?withImages=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(11))
+        .andExpect(jsonPath("$.pois.length()").value(12))
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
   }
 
