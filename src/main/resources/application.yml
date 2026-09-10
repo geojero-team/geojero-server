@@ -10,6 +10,7 @@ server:
 cors:
   allowed-origins:
     - http://localhost:5173
+    - https://www.geojero.com
     - https://geojero-client.vercel.app
     - https://geojero-client-*.vercel.app
 

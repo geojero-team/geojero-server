@@ -17,3 +17,7 @@ tour:
   info-base-url: https://apis.data.go.kr/B551011/KorService2
   photo-key: ${TOUR_PHOTO_KEY}
   photo-base-url: https://apis.data.go.kr/B551011/PhotoGalleryService1
+
+kakao:
+  client-id: ${KAKAO_CLIENT_ID}
+  client-secret: ${KAKAO_CLIENT_SECRET}
