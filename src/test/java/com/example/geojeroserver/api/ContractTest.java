@@ -181,6 +181,27 @@ class ContractTest {
             org.hamcrest.Matchers.isOneOf("configured", "temporary")));
   }
 
+  /**
+   * 공휴일이 평일로 판정되면 그날 답이 통째로 틀린다 — 남부면 마을버스는 휴일 전면 운휴다
+   * (기준문서 §2). 토·일은 날짜에서 알아내므로, holidays 표가 실제로 일하는 건
+   * **평일에 걸린 공휴일**뿐이다. 2026-09-25는 금요일이지만 추석이다.
+   *
+   * 9/28(월)을 평일로 못박아 둔 것은 의도적이다. 오늘(2026-09-11) 기준 임시공휴일이
+   * 아니지만 국무회의로 지정될 수 있고, 지정되면 심사 구간 한복판이다.
+   * **지정되면 이 테스트가 깨진다 — 그때 V13 다음 마이그레이션으로 넣으라는 신호다.**
+   */
+  @Test void 공휴일은_평일이_아니라_휴일로_판정한다() throws Exception {
+    String chuseok = """
+        {"date":"2026-09-25","startTime":"09:00","legs":[{"type":"BUS","from":"고현","to":"해금강"}]}""";
+    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(chuseok))
+        .andExpect(jsonPath("$.dayClass").value("HOLIDAY"));
+
+    String monday = """
+        {"date":"2026-09-28","startTime":"09:00","legs":[{"type":"BUS","from":"고현","to":"해금강"}]}""";
+    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(monday))
+        .andExpect(jsonPath("$.dayClass").value("WEEKDAY"));
+  }
+
   @Test void POI_상세_폴백형태() throws Exception {
     mvc.perform(get("/api/pois/1?lang=en"))
         .andExpect(jsonPath("$.name").value("바람의언덕"))
