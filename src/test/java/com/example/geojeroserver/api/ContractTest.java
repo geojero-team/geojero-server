@@ -170,6 +170,17 @@ class ContractTest {
         .andExpect(jsonPath("$.legs[-1].reason").isNotEmpty());
   }
 
+  /**
+   * `/api/meta`가 세션 서명키 설정 여부를 답한다 — 값이 아니라 예/아니오만.
+   * 배포된 서버가 재배포마다 전원 로그아웃되는 상태인지 밖에서 확인하는 유일한 창이다.
+   */
+  @Test void meta_가_세션키_설정여부를_알린다() throws Exception {
+    mvc.perform(get("/api/meta"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.sessionKey",
+            org.hamcrest.Matchers.isOneOf("configured", "temporary")));
+  }
+
   @Test void POI_상세_폴백형태() throws Exception {
     mvc.perform(get("/api/pois/1?lang=en"))
         .andExpect(jsonPath("$.name").value("바람의언덕"))

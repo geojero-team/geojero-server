@@ -30,9 +30,11 @@ public class SessionCookies {
   private static final long TTL_SEC = 7 * 24 * 3600;
 
   private final byte[] key;
+  private final boolean configured;
 
   public SessionCookies(@Value("${SESSION_SECRET:}") String secret) {
-    if (secret == null || secret.isBlank()) {
+    configured = secret != null && !secret.isBlank();
+    if (!configured) {
       key = new byte[32];
       new SecureRandom().nextBytes(key);
       LoggerFactory.getLogger(SessionCookies.class)
@@ -40,6 +42,18 @@ public class SessionCookies {
     } else {
       key = secret.getBytes(StandardCharsets.UTF_8);
     }
+  }
+
+  /**
+   * 시크릿이 주입됐는가. **값도, 값에서 유도한 것도 절대 내보내지 않는다** — 예/아니오뿐이다.
+   *
+   * 왜 필요한가: 이게 없으면 "설정됐는지"를 밖에서 확인할 방법이 없다. EC2 로그나 `.env`를
+   * 볼 수 있는 사람만 답할 수 있었고, 실제로 한 번 잘못 단정했다(2026-09-11). 설정 파일에
+   * 줄이 없는 것은 미설정의 증거가 아니다 — `@Value`는 OS 환경변수를 직접 읽는다.
+   * 헷갈리는 지점은 `.env`에 넣은 것과 컨테이너 `environment:`에 올라간 것이 다르다는 것이다.
+   */
+  public boolean isSecretConfigured() {
+    return configured;
   }
 
   /**

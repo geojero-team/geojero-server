@@ -1,5 +1,6 @@
 package com.example.geojeroserver.api;
 
+import com.example.geojeroserver.auth.SessionCookies;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,9 +14,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class MetaController {
   private final JdbcTemplate jdbc;
+  private final SessionCookies sessions;
 
-  public MetaController(JdbcTemplate jdbc) {
+  public MetaController(JdbcTemplate jdbc, SessionCookies sessions) {
     this.jdbc = jdbc;
+    this.sessions = sessions;
   }
 
   @GetMapping("/api/meta")
@@ -24,6 +27,12 @@ public class MetaController {
         """
         SELECT max(based_on)::text FROM timetable_versions
         WHERE source_file LIKE '%.xlsx'""", String.class); // BIS 표지 기준일 (seed 버전 제외)
-    return Map.of("ok", true, "dataVersion", basedOn == null ? "미적재" : basedOn);
+    return Map.of(
+        "ok", true,
+        "dataVersion", basedOn == null ? "미적재" : basedOn,
+        // 세션 서명키가 주입됐는가. temporary 면 **재배포마다 전 사용자가 로그아웃된다**.
+        // 값은 내보내지 않는다 — 설정 여부만이다. 이걸 밖에서 못 보면 EC2에 붙을 수 있는
+        // 사람만 답할 수 있고, 실제로 그 때문에 한 번 잘못 단정했다(2026-09-11).
+        "sessionKey", sessions.isSecretConfigured() ? "configured" : "temporary");
   }
 }
