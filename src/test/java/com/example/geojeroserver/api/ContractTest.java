@@ -56,8 +56,10 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[7].theme").value(org.hamcrest.Matchers.nullValue()))
         // V6 — 화면 목록에는 있는데 시드에 없어 사진도 좌표도 못 받던 곳.
         // contentId·좌표는 TourAPI searchKeyword2 실호출로 확인한 값이다.
+        // V11에서 theme만 거두었다(9경 아님 + 우회로 코스 불성립 + 쓸 사진 없음).
+        // 행은 남는다 — 우회가 풀리면 theme만 되돌리면 된다.
         .andExpect(jsonPath("$.pois[11].name").value("명사해수욕장"))
-        .andExpect(jsonPath("$.pois[11].theme").value("BEACH"))
+        .andExpect(jsonPath("$.pois[11].theme").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.pois[11].region").value("남부권"))
         .andExpect(jsonPath("$.pois[11].lat").value(34.7272514))
         // V9 — 거제 9경 중 유일하게 고현(진입 관문)에 있는 스팟. 화면 스팟이 전부
@@ -66,6 +68,23 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[12].shortName").value("포로수용소"))
         .andExpect(jsonPath("$.pois[12].tier").value("BEST"))
         .andExpect(jsonPath("$.pois[12].lat").value(34.8764184));
+  }
+
+  /**
+   * 화면이 말하는 스팟 수와 서버가 분류한 스팟 수가 같아야 한다.
+   *
+   * V4의 계약이 "화면은 theme 이 NULL 인 POI 를 목록에서 거른다"이므로, theme 가 붙은
+   * 행 수가 곧 화면에 뜨는 스팟 수다. 기준문서 §6이 정한 답은 **8곳**이다
+   * (거제 9경 중 7경 + 그 경으로 가는 배를 타는 도장포 선착장).
+   *
+   * 숫자가 어긋나면 시드가 늘었거나(V6 명사 사례) 컷이 발동한 것이다. 어느 쪽이든
+   * 기준문서를 먼저 고치고 이 숫자를 따라 고친다 — 반대 방향은 안 된다.
+   */
+  @Test void POI목록_화면에_뜨는_스팟은_8곳이다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        // ?(@.theme) 는 '키가 있는가'만 보아 null 인 것까지 걸린다. null 비교여야 한다.
+        .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(8)));
   }
 
   /** withImages는 POI마다 TourAPI를 부른다. 키가 없거나 실패해도 목록 자체는 성립해야 한다. */
@@ -136,6 +155,19 @@ class ContractTest {
         .andExpect(jsonPath("$.feasible").value("NO"))
         .andExpect(jsonPath("$.legs[-1].reason",
             org.hamcrest.Matchers.containsString("귀환")));
+  }
+
+  @Test void 코스판정_앞구간_불성립이면_귀환편에도_이유가_있다() throws Exception {
+    // 고현 23:00 도착이면 55번은 이미 끊겼다(막차 고현발 19:15) → 앞 구간부터 불성립.
+    // 그때 귀환편 구간까지 '이유 없는 NO'로 나가면 안 된다 — 이유 없는 빈칸은
+    // 이 서비스가 지적하는 문제 그 자체다(CLAUDE.md 절대 규칙 3, 8.17 재난 공백).
+    String body = """
+        {"date":"2026-09-09","arrivalTime":"23:00","returnTime":"23:30"}""";
+    mvc.perform(post("/api/courses/1/judge")
+            .contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(jsonPath("$.feasible").value("NO"))
+        .andExpect(jsonPath("$.legs[-1].ok").value("NO"))
+        .andExpect(jsonPath("$.legs[-1].reason").isNotEmpty());
   }
 
   @Test void POI_상세_폴백형태() throws Exception {

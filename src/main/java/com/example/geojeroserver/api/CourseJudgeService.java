@@ -67,9 +67,24 @@ public class CourseJudgeService {
               + TimeUtil.minToHHMM(lastArrive) + ")"));
       feasible = Verdict.NO;
     } else {
-      resultLegs.add(new LegResult(feasible == Verdict.YES ? Verdict.YES : feasible,
-          returnMin, null, null)); // 귀환편 탑승
+      resultLegs.add(new LegResult(feasible, returnMin, null, upstreamReason(feasible)));
     }
     return JudgeController.toRes(snap, new JudgeResult(feasible, List.copyOf(resultLegs)));
+  }
+
+  /**
+   * 귀환편 구간에 붙일 사유.
+   *
+   * 귀환편 자체는 예매한 것이라 막힐 일이 없다. 그래도 앞 구간이 깨지면 이 구간도 불성립으로
+   * 끌려 내려가는데, 그때 이유를 비워두면 화면에 **사유 없는 '불성립'**이 찍힌다.
+   * 그건 8.17 재난을 '이유 없는 빈칸'으로 표시한 지도앱과 같은 잘못이고,
+   * 이 서비스의 명제가 지적하는 문제 그 자체다(CLAUDE.md 절대 규칙 3).
+   */
+  private static String upstreamReason(Verdict feasible) {
+    return switch (feasible) {
+      case YES -> null;  // 성립한 구간에는 붙일 이유가 없다
+      case UNKNOWN -> "앞 구간을 확인할 수 없어 귀환편도 판정할 수 없다";
+      case NO -> "앞 구간이 성립하지 않아 귀환편을 탈 수 없다";
+    };
   }
 }
