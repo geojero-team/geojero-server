@@ -42,6 +42,17 @@ class AuthTripsTest {
   @Autowired SessionCookies sessions;
   @MockitoBean KakaoGateway kakao;
 
+  /**
+   * 테스트들이 같은 사용자(OAUTH_ID)를 공유하므로 저장 일정을 매번 비운다.
+   * 이게 없으면 앞 테스트가 남긴 행이 뒤 테스트의 목록에 섞인다 — 실제로 섞였다.
+   */
+  @org.junit.jupiter.api.BeforeEach
+  void clearTrips() {
+    jdbc.update("""
+        DELETE FROM saved_trips WHERE user_id IN
+          (SELECT user_id FROM users WHERE provider = 'KAKAO' AND oauth_id = ?)""", OAUTH_ID);
+  }
+
   @AfterAll
   void cleanup() {
     // saved_trips는 ON DELETE CASCADE로 함께 정리
@@ -227,6 +238,82 @@ class AuthTripsTest {
         .content("""
             {"courseId":1,"travelDate":"2026-09-09",
              "arrivalTime":"없는시각","returnTime":"21:10"}"""))
+        .andExpect(status().isBadRequest());
+  }
+
+  private Cookie loggedIn() {
+    Long uid = jdbc.queryForObject("""
+        INSERT INTO users (provider, oauth_id) VALUES ('KAKAO', ?)
+        ON CONFLICT (provider, oauth_id) DO UPDATE SET updated_at = now()
+        RETURNING user_id""", Long.class, OAUTH_ID);
+    return new Cookie("gj_session", sessions.issue(uid).getValue());
+  }
+
+  /**
+   * ★ 추천 코스(V17)를 저장할 수 있어야 한다.
+   *
+   * 전에는 코스 존재 확인이 상수 3종(courseId 1~3)만 봐서 101~103 저장이 400이었다.
+   * 코스가 DB로 옮겨왔으므로 확인도 DB에서 한다.
+   */
+  @Test
+  void 저장_추천코스를_가리킬_수_있다() throws Exception {
+    mvc.perform(post("/api/saved-trips").cookie(loggedIn())
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"courseId":101,"travelDate":"2026-09-14"}"""))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.courseId").value(101))
+        .andExpect(jsonPath("$.title").value("학동 · 해금강 · 바람의언덕"));
+  }
+
+  /**
+   * ★ 출발·복귀 시각은 사용자가 고르는 값이 아니다 — 코스에 이미 박혀 있다.
+   *
+   * 판정 시절엔 사용자가 "거제 도착 08:20 / 복귀 21:10"을 입력하면 막차를 역산해
+   * 성립을 따졌고, 그래서 클라가 그 둘을 보냈다(ConditionsPage). 판정이 빠지고 코스를
+   * 우리가 짜서 내려주면서 고를 자리가 없어졌다 — 02-2 코스 상세에 입력이 없다.
+   * 그래서 클라는 {courseId, travelDate} 둘만 보내고 서버가 코스에서 채운다.
+   * 비우지 않고 채우는 이유: 「내 일정」이 "11:05 출발 → 19:40 복귀"를 보여줄 수 있다.
+   */
+  @Test
+  void 저장_시각을_안_보내면_코스에서_채운다() throws Exception {
+    var cookie = loggedIn();
+    mvc.perform(post("/api/saved-trips").cookie(cookie)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"courseId":101,"travelDate":"2026-09-14"}"""))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.arrivalTime").value("11:05"))
+        .andExpect(jsonPath("$.returnTime").value("19:40"));
+
+    mvc.perform(get("/api/saved-trips").cookie(cookie))
+        .andExpect(jsonPath("$[0].arrivalTime").value("11:05"))
+        .andExpect(jsonPath("$[0].returnTime").value("19:40"));
+  }
+
+  /** 클라가 시각을 보내면 그 값을 쓴다 — §3 검증 코스는 시각이 없어 이 경로가 필요하다. */
+  @Test
+  void 저장_시각을_보내면_보낸_값을_쓴다() throws Exception {
+    mvc.perform(post("/api/saved-trips").cookie(loggedIn())
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"courseId":101,"travelDate":"2026-09-14",
+             "arrivalTime":"08:20","returnTime":"21:10"}"""))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.arrivalTime").value("08:20"))
+        .andExpect(jsonPath("$.returnTime").value("21:10"));
+  }
+
+  /**
+   * 코스에도 시각이 없고 보내지도 않으면 저장하지 않는다.
+   * 빈 값으로 채우면 「내 일정」이 이유 없는 빈칸을 그린다(절대규칙 3).
+   */
+  @Test
+  void 저장_시각을_어디서도_못_구하면_400() throws Exception {
+    mvc.perform(post("/api/saved-trips").cookie(loggedIn())
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("""
+            {"courseId":1,"travelDate":"2026-09-09"}"""))
         .andExpect(status().isBadRequest());
   }
 }

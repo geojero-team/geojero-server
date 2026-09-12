@@ -1,6 +1,5 @@
 package com.example.geojeroserver.trips;
 
-import com.example.geojeroserver.api.CourseController;
 import com.example.geojeroserver.auth.SessionCookies;
 import com.example.geojeroserver.engine.TimeUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -69,24 +68,41 @@ public class SavedTripController {
     if (body.courseId() == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "courseId 가 필요하다");
     }
-    if (!CourseController.hasCourse(body.courseId())) {
+    // 코스는 이제 DB에 있다(V17 추천 코스 + CourseSeeder 검증 코스). 상수만 보면
+    // 추천 코스 저장이 전부 400이 된다.
+    var course = jdbc.queryForList("""
+        SELECT course_name, summary, depart_time, return_time
+        FROM courses WHERE course_id = ? AND enabled""", body.courseId());
+    if (course.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "알 수 없는 코스");
     }
+    var c = course.get(0);
 
     LocalDate date;
     LocalTime arrival;
     LocalTime ret;
     try {
       date = LocalDate.parse(body.travelDate());
-      arrival = toTime(body.arrivalTime());
-      ret = toTime(body.returnTime());
+      // 출발·복귀 시각은 사용자가 고르는 값이 아니다 — 코스에 이미 박혀 있다.
+      // 판정 시절엔 입력값이었고(막차 역산의 입력), 판정이 빠지고 코스를 우리가 짜서
+      // 내려주면서 고를 자리가 없어졌다(02-2 코스 상세에 입력이 없다).
+      // 보내오면 그 값을 쓰고(§3 검증 코스는 코스에 시각이 없다), 안 보내면 코스에서 채운다.
+      arrival = body.arrivalTime() != null ? toTime(body.arrivalTime())
+          : (LocalTime) sqlTime(c.get("depart_time"));
+      ret = body.returnTime() != null ? toTime(body.returnTime())
+          : (LocalTime) sqlTime(c.get("return_time"));
     } catch (RuntimeException e) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
           "travelDate/arrivalTime/returnTime 형식 오류 (YYYY-MM-DD / HH:MM)");
     }
+    if (arrival == null || ret == null) {
+      // 비운 채 저장하면 「내 일정」이 이유 없는 빈칸을 그린다(절대규칙 3).
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+          "이 코스는 출발·복귀 시각이 없어 arrivalTime/returnTime 을 함께 보내야 한다");
+    }
 
-    String title = courseName(body.courseId());
-    String chain = courseSummary(body.courseId());
+    String title = (String) c.get("course_name");
+    String chain = (String) c.get("summary");
 
     long id = jdbc.queryForObject("""
         INSERT INTO saved_trips
@@ -120,14 +136,9 @@ public class SavedTripController {
         HM.format(arrival), HM.format(ret));
   }
 
-  private static String courseName(long courseId) {
-    return CourseController.COURSES.stream().filter(c -> c.courseId() == courseId)
-        .findFirst().map(CourseController.CourseDto::name).orElse(null);
-  }
-
-  private static String courseSummary(long courseId) {
-    return CourseController.COURSES.stream().filter(c -> c.courseId() == courseId)
-        .findFirst().map(CourseController.CourseDto::summary).orElse(null);
+  /** DB의 time 컬럼을 LocalTime 으로. 값이 없으면 null 그대로 둔다. */
+  private static LocalTime sqlTime(Object o) {
+    return o == null ? null : ((java.sql.Time) o).toLocalTime();
   }
 
   private static LocalTime toTime(String s) {

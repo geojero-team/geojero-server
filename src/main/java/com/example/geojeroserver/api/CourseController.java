@@ -209,13 +209,8 @@ public class CourseController {
         stops, legs);
   }
 
-  /**
-   * 저장 일정이 코스를 가리킬 때 그 코스가 있는지 확인한다.
-   * 판정을 걷어내며 CourseJudgeService.hasCourse가 하던 일을 여기로 옮겼다(2026-09-12).
-   */
-  public static boolean hasCourse(long courseId) {
-    return COURSES.stream().anyMatch(c -> c.courseId() == courseId);
-  }
+  // 코스 존재 확인(hasCourse)은 SavedTripController가 DB에서 직접 한다 —
+  // 코스가 상수에서 DB로 옮겨왔고, 상수만 보면 추천 코스 저장이 전부 400이 된다.
 
   // ── 표시 형식 ─────────────────────────────────────────────────────────────
 
