@@ -2,16 +2,12 @@ package com.example.geojeroserver.api;
 
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class CourseController {
   public record CourseDto(long courseId, String name, String theme, String summary) {}
   public record CoursesRes(List<CourseDto> courses) {}
-  public record CourseJudgeReq(String date, String arrivalTime, String returnTime) {}
 
   /** §3 검증 코스 3종 — 확정 데이터 기반 상수. DB 동기화는 CourseSeeder(saved_trips FK 원천). */
   public static final List<CourseDto> COURSES = List.of(
@@ -22,20 +18,16 @@ public class CourseController {
       new CourseDto(3, "외도 풀코스", "ISLAND",
           "도장포 막배 15:30 → 18:20 복귀 → 버스 연결"));
 
-  private final CourseJudgeService judge;
-
-  public CourseController(CourseJudgeService judge) {
-    this.judge = judge;
-  }
-
   @GetMapping("/api/courses")
   public CoursesRes courses() {
     return new CoursesRes(COURSES);
   }
 
-  @PostMapping("/api/courses/{courseId}/judge")
-  public JudgeController.JudgeRes judgeCourse(@PathVariable long courseId,
-      @RequestBody CourseJudgeReq req) {
-    return judge.judge(courseId, req.date(), req.arrivalTime(), req.returnTime());
+  /**
+   * 저장 일정이 코스를 가리킬 때 그 코스가 있는지 확인한다.
+   * 판정을 걷어내며 CourseJudgeService.hasCourse가 하던 일을 여기로 옮겼다(2026-09-12).
+   */
+  public static boolean hasCourse(long courseId) {
+    return COURSES.stream().anyMatch(c -> c.courseId() == courseId);
   }
 }

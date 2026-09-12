@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** 계약 v0 재현 검증 — 값은 전부 회귀에서 검증된 실데이터. */
@@ -36,7 +35,7 @@ class ContractTest {
   @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(13)) // V6 명사해수욕장 + V9 포로수용소
+        .andExpect(jsonPath("$.pois.length()").value(22)) // 13 + V14 권역 스팟 9곳
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
@@ -74,24 +73,45 @@ class ContractTest {
    * 화면이 말하는 스팟 수와 서버가 분류한 스팟 수가 같아야 한다.
    *
    * V4의 계약이 "화면은 theme 이 NULL 인 POI 를 목록에서 거른다"이므로, theme 가 붙은
-   * 행 수가 곧 화면에 뜨는 스팟 수다. 기준문서 §6이 정한 답은 **8곳**이다
-   * (거제 9경 중 7경 + 그 경으로 가는 배를 타는 도장포 선착장).
+   * 행 수가 곧 화면에 뜨는 스팟 수다. 답은 **17곳**이다 — 거제 9경 기준 8곳(V3~V11)에
+   * 권역별 스팟 9곳(V14, 2026-09-12)을 더한 것이다.
    *
-   * 숫자가 어긋나면 시드가 늘었거나(V6 명사 사례) 컷이 발동한 것이다. 어느 쪽이든
+   * 숫자가 어긋나면 시드가 늘었거나 컷이 발동한 것이다. 어느 쪽이든
    * 기준문서를 먼저 고치고 이 숫자를 따라 고친다 — 반대 방향은 안 된다.
    */
-  @Test void POI목록_화면에_뜨는_스팟은_8곳이다() throws Exception {
+  @Test void POI목록_화면에_뜨는_스팟은_17곳이다() throws Exception {
+    // 8곳 → 17곳 (V14, 2026-09-12). 권역별 스팟 9곳을 더했다.
+    // 판정을 걷어내고 '우리가 짠 코스'를 보여주기로 하면서 선정 기준이 바뀌었다 —
+    // 전역 분산(판정에 유리)에서 권역별 뭉침(코스에 필요)으로. V14 주석 참고.
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
         // ?(@.theme) 는 '키가 있는가'만 보아 null 인 것까지 걸린다. null 비교여야 한다.
-        .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(8)));
+        .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(17)));
+  }
+
+  /** 권역이 빠진 스팟이 있으면 카드에 '남부권 · 해수욕장' 자리가 비어 나간다. */
+  @Test void 화면에_뜨는_스팟은_권역이_다섯_갈래로_채워져_있다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == null)]",
+            org.hamcrest.Matchers.hasSize(0)))
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '남부권')]",
+            org.hamcrest.Matchers.hasSize(5)))
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '동부권')]",
+            org.hamcrest.Matchers.hasSize(5)))
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '북부권')]",
+            org.hamcrest.Matchers.hasSize(3)))
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '서부권')]",
+            org.hamcrest.Matchers.hasSize(3)))
+        .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '중부권')]",
+            org.hamcrest.Matchers.hasSize(1)));
   }
 
   /** withImages는 POI마다 TourAPI를 부른다. 키가 없거나 실패해도 목록 자체는 성립해야 한다. */
   @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
     mvc.perform(get("/api/pois?withImages=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(13))
+        .andExpect(jsonPath("$.pois.length()").value(22))
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
   }
 
@@ -113,61 +133,43 @@ class ContractTest {
         .andExpect(jsonPath("$.lastDeparture").value("19:15"));
   }
 
-  @Test void 판정_부산발_당일치기_YES() throws Exception {
-    String body = """
-        {"date":"2026-09-09","startTime":"06:50","legs":[
-          {"type":"BUS","from":"부산사상","to":"고현"},
-          {"type":"BUS","from":"고현","to":"해금강"},
-          {"type":"BUS","from":"해금강","to":"고현"},
-          {"type":"BUS","from":"고현","to":"부산사상","boardOnly":true}]}""";
-    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(jsonPath("$.feasible").value("YES"))
-        .andExpect(jsonPath("$.legs[0].arrive").value("08:20"))
+  /**
+   * 판정(POST /api/judge, POST /api/courses/{id}/judge)은 제거됐다(2026-09-12).
+   * 아래 셋은 그 엔드포인트가 지키던 **사실**을 조회 엔드포인트로 옮긴 것이다 —
+   * 판정이 사라져도 원문 대조는 남는다(기준문서 §6 「컷 불가 바닥」의 '검증 게이트').
+   */
+  @Test void 출발조회_부산사상에서_고현_0820_도착() throws Exception {
+    // §3 '부산발 당일치기'의 첫 구간. 07:00 출발 → 08:20 도착이 앵커다.
+    mvc.perform(get("/api/stops/부산사상/departures?to=고현&date=2026-09-09"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.departures[0].depart").value("07:00"))
+        .andExpect(jsonPath("$.departures[0].arrive").value("08:20"));
+  }
+
+  @Test void 출발조회_해금강발_복귀_1848과_막차_2005() throws Exception {
+    // §2 복귀표. 도장포 막배 18:20 복귀 뒤 탈 수 있는 버스가 18:48이고 막차가 20:05다.
+    mvc.perform(get("/api/stops/해금강/departures?to=고현&date=2026-09-09&after=18:20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.departures[0].depart").value("18:48"))
+        .andExpect(jsonPath("$.lastDeparture").value("20:05"));
+  }
+
+  @Test void 출발조회_여차는_격자에_없어_빈_결과다() throws Exception {
+    // 원문상 '여차'는 독립 열이 아니라 홍포 열의 주석("12:50 (여차)")이라 정류소 격자에 없다.
+    // 빈 결과가 현 데이터의 정답이고, **없는 시각을 만들지 않는다**(절대규칙 1).
+    // 주석 정류소 승격은 파서 백로그.
+    mvc.perform(get("/api/stops/고현/departures?to=여차&date=2026-09-09"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.departures").isEmpty())
+        .andExpect(jsonPath("$.lastDeparture").doesNotExist());
+  }
+
+  @Test void 운영상태_알림은_조회에서_확인한다() throws Exception {
+    // 전에는 판정 응답이 alerts를 함께 실어 보냈다. 이제 전용 엔드포인트로만 본다.
+    mvc.perform(get("/api/alerts?date=2026-09-09"))
+        .andExpect(status().isOk())
         .andExpect(jsonPath("$.alerts[?(@.stop=='홍포')].kind",
             org.hamcrest.Matchers.hasItem("DETOUR")));
-  }
-
-  @Test void 판정_여차_오후_NO_이유문장() throws Exception {
-    String body = """
-        {"date":"2026-09-09","startTime":"13:00","legs":[
-          {"type":"BUS","from":"고현","to":"여차"}]}""";
-    // 원문상 '여차'는 독립 열이 아니라 홍포 열의 주석(개행 포함 "12:50 (여차)")이라 정류소 격자에 없음
-    // → "운행 없음"이 현 데이터의 정답. 주석 정류소 승격은 파서 백로그.
-    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(jsonPath("$.feasible").value("NO"))
-        .andExpect(jsonPath("$.legs[0].reason",
-            org.hamcrest.Matchers.containsString("운행 없음")));
-  }
-
-  @Test void 코스판정_부산발_YES_귀환검사포함() throws Exception {
-    String body = """
-        {"date":"2026-09-09","arrivalTime":"08:20","returnTime":"21:10"}""";
-    mvc.perform(post("/api/courses/1/judge")
-            .contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(jsonPath("$.feasible").value("YES"));
-  }
-
-  @Test void 코스판정_귀환시각_불가시_NO() throws Exception {
-    String body = """
-        {"date":"2026-09-09","arrivalTime":"08:20","returnTime":"10:00"}""";
-    mvc.perform(post("/api/courses/1/judge")
-            .contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(jsonPath("$.feasible").value("NO"))
-        .andExpect(jsonPath("$.legs[-1].reason",
-            org.hamcrest.Matchers.containsString("귀환")));
-  }
-
-  @Test void 코스판정_앞구간_불성립이면_귀환편에도_이유가_있다() throws Exception {
-    // 고현 23:00 도착이면 55번은 이미 끊겼다(막차 고현발 19:15) → 앞 구간부터 불성립.
-    // 그때 귀환편 구간까지 '이유 없는 NO'로 나가면 안 된다 — 이유 없는 빈칸은
-    // 이 서비스가 지적하는 문제 그 자체다(CLAUDE.md 절대 규칙 3, 8.17 재난 공백).
-    String body = """
-        {"date":"2026-09-09","arrivalTime":"23:00","returnTime":"23:30"}""";
-    mvc.perform(post("/api/courses/1/judge")
-            .contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(jsonPath("$.feasible").value("NO"))
-        .andExpect(jsonPath("$.legs[-1].ok").value("NO"))
-        .andExpect(jsonPath("$.legs[-1].reason").isNotEmpty());
   }
 
   /**
@@ -190,16 +192,31 @@ class ContractTest {
    * 아니지만 국무회의로 지정될 수 있고, 지정되면 심사 구간 한복판이다.
    * **지정되면 이 테스트가 깨진다 — 그때 V13 다음 마이그레이션으로 넣으라는 신호다.**
    */
-  @Test void 공휴일은_평일이_아니라_휴일로_판정한다() throws Exception {
-    String chuseok = """
-        {"date":"2026-09-25","startTime":"09:00","legs":[{"type":"BUS","from":"고현","to":"해금강"}]}""";
-    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(chuseok))
+  @Test void 공휴일은_평일이_아니라_휴일로_분류된다() throws Exception {
+    // 판정 제거로 통로만 바꿨다(POST /api/judge → GET timetable). 지키는 것은 그대로다 —
+    // dayClass 는 시간표 응답에도 실려 나온다.
+    mvc.perform(get("/api/routes/55/timetable?date=2026-09-25"))
+        .andExpect(status().isOk())
         .andExpect(jsonPath("$.dayClass").value("HOLIDAY"));
 
-    String monday = """
-        {"date":"2026-09-28","startTime":"09:00","legs":[{"type":"BUS","from":"고현","to":"해금강"}]}""";
-    mvc.perform(post("/api/judge").contentType(MediaType.APPLICATION_JSON).content(monday))
+    mvc.perform(get("/api/routes/55/timetable?date=2026-09-28"))
+        .andExpect(status().isOk())
         .andExpect(jsonPath("$.dayClass").value("WEEKDAY"));
+  }
+
+  /**
+   * 휴일에 남부면 마을버스가 정말로 빠지는가 — §2 "마을버스 남부면 전 노선 휴일 운휴".
+   * dayClass 만 맞고 시간표가 그대로면 공휴일 표가 일을 안 하는 것이다.
+   */
+  @Test void 추석에는_남부면_마을버스가_빠지고_55번은_그대로다() throws Exception {
+    mvc.perform(get("/api/routes/남부1/timetable?date=2026-09-25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.trips").isEmpty());
+
+    mvc.perform(get("/api/routes/55/timetable?date=2026-09-25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.trips[?(@.direction==0)].stops[?(@.stop=='고현')].time",
+            org.hamcrest.Matchers.hasItems("06:25", "19:15")));
   }
 
   @Test void POI_상세_폴백형태() throws Exception {
