@@ -100,6 +100,32 @@ public final class Timetable {
     return false;
   }
 
+  /**
+   * 정차는 확실하나 시각이 미상인 회차의 **노선 번호들**. hasUnknownTime이 참인 이유를 댄다.
+   *
+   * 화면 문구가 "남부2 정차 · 시각 [미확인]"이므로 참/거짓만으로는 부족하다 —
+   * 어느 노선이 서는지를 말해야 사용자가 BIS에서 확인할 수 있다.
+   * 중복은 없애고 원문 순서를 지킨다.
+   */
+  public static List<String> unknownTimeRoutes(Snapshot s, String from, String to) {
+    var out = new ArrayList<String>();
+    for (Trip t : s.trips()) {
+      if (out.contains(t.routeNo())) continue;
+      int i = indexOf(t, from, 0);
+      if (i < 0 || t.stops().get(i).status() != StopStatus.TEXT) continue;
+      if (to == null) {
+        out.add(t.routeNo());
+        continue;
+      }
+      int j = indexOf(t, to, i + 1);
+      if (j >= 0) {
+        var st = t.stops().get(j).status();
+        if (st != StopStatus.SKIP && st != StopStatus.EMPTY) out.add(t.routeNo());
+      }
+    }
+    return out;
+  }
+
   /** from→to 마지막 출발 시각. 없으면 null. */
   public static Integer lastDeparture(Snapshot s, String from, String to) {
     var r = rides(s, from, to);
