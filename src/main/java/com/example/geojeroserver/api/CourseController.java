@@ -48,9 +48,17 @@ public class CourseController {
   public record SpotBrief(int seq, long poiId, String name, String shortName,
       String theme, Double lat, Double lng) {}
 
+  /**
+   * ★ {@code busMinTotal} 이 이 서비스가 소유한 숫자다 — 구간 이동시간의 합이다.
+   *
+   * {@code approxTotalMin}(약 8시간 30분)은 출발부터 복귀까지의 **경과 시간**이라
+   * 머무는 시간이 대부분이다(3-01: 버스 114분 + 머무는 401분). 얼마나 머물지는
+   * 사용자가 정하는 것이라 2026-09-13에 화면에서 뺐다 — 컬럼과 필드는 남긴다.
+   */
   public record CourseCard(long courseId, String courseCode, int spotCount, int rank,
       int nineScenicCount, String name, String summary,
       String departAt, String returnAt, int approxTotalMin, String approxTotalText,
+      int busMinTotal, String busTotalText,
       List<SpotBrief> spots) {}
 
   public record CoursesRes(Map<String, Integer> counts, List<CourseCard> courses) {}
@@ -76,7 +84,8 @@ public class CourseController {
   public record CourseDetail(long courseId, String courseCode, String name, String summary,
       String theme, Integer spotCount, Integer nineScenicCount,
       String departAt, String returnAt, Integer totalMin, Integer approxTotalMin,
-      String approxTotalText, int legCount, int estimatedLegCount,
+      String approxTotalText, int busMinTotal, String busTotalText,
+      int legCount, int estimatedLegCount,
       String service, String baseDate, String source,
       String originName, String originStop,
       List<CourseStop> stops, List<Leg> legs) {}
@@ -110,18 +119,35 @@ public class CourseController {
         ? jdbc.queryForList(sql + " ORDER BY spot_count, rank_no")
         : jdbc.queryForList(sql + " AND spot_count = ? ORDER BY spot_count, rank_no", spotCount);
 
+    // 구간 이동시간 합을 한 번에 받아 둔다 — 카드마다 물으면 코스 수만큼 쿼리가 늘어난다.
+    var busMin = busMinByCourse();
+
     var cards = new ArrayList<CourseCard>();
     for (var c : rows) {
       long id = num(c.get("course_id"));
       int approx = (int) num(c.get("approx_total_min"));
+      int bus = busMin.getOrDefault(id, 0);
       cards.add(new CourseCard(id, (String) c.get("course_code"),
           (int) num(c.get("spot_count")), (int) num(c.get("rank_no")),
           (int) num(c.get("nine_scenic_count")),
           (String) c.get("course_name"), (String) c.get("summary"),
           hm(c.get("depart_time")), hm(c.get("return_time")),
-          approx, approxText(approx), spotBriefs(id)));
+          approx, approxText(approx),
+          bus, approxText(bus), spotBriefs(id)));
     }
     return new CoursesRes(counts, cards);
+  }
+
+  /** course_id → 구간 이동시간 합(분). 구간이 없는 코스는 키가 없다. */
+  private Map<Long, Integer> busMinByCourse() {
+    var out = new LinkedHashMap<Long, Integer>();
+    jdbc.query("""
+        SELECT course_id, COALESCE(sum(duration_min), 0) AS bus_min
+        FROM course_legs GROUP BY course_id""",
+        rs -> {
+          out.put(rs.getLong("course_id"), rs.getInt("bus_min"));
+        });
+    return out;
   }
 
   private List<SpotBrief> spotBriefs(long courseId) {
@@ -194,12 +220,15 @@ public class CourseController {
     }
 
     Integer approx = (Integer) c.get("approx_total_min");
+    // 구간 이동시간 합. 이미 만든 legs 를 더하므로 쿼리를 더 쏘지 않는다.
+    int busMin = legs.stream().mapToInt(Leg::durationMin).sum();
     return new CourseDetail(courseId, (String) c.get("course_code"),
         (String) c.get("course_name"), (String) c.get("summary"), (String) c.get("theme"),
         (Integer) c.get("spot_count"), (Integer) c.get("nine_scenic_count"),
         hm(c.get("depart_time")), hm(c.get("return_time")),
         (Integer) c.get("total_min"), approx,
         approx == null ? null : approxText(approx),
+        busMin, approxText(busMin),
         legs.size(), (int) legs.stream().filter(Leg::estimated).count(),
         (String) c.get("service"),
         c.get("base_date") == null ? null : c.get("base_date").toString(),

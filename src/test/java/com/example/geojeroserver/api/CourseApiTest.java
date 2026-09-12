@@ -45,6 +45,11 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courses[0].departAt").value("11:05"))
         .andExpect(jsonPath("$.courses[0].returnAt").value("19:40"))
         .andExpect(jsonPath("$.courses[0].approxTotalText").value("약 8시간 30분"))
+        // ★ 화면이 실제로 적는 것은 이쪽이다 — 구간 이동시간의 합(40+10+12+52=114분).
+        // approxTotalMin(510분)에서 버스는 114분뿐이고 나머지는 머무는 시간이다(합 401분).
+        // 얼마나 머무는지는 사용자가 정하므로 2026-09-13에 화면에서 뺐다 — 필드는 남긴다.
+        .andExpect(jsonPath("$.courses[0].busMinTotal").value(114))
+        .andExpect(jsonPath("$.courses[0].busTotalText").value("약 1시간 54분"))
         // 카드의 원형 썸네일 3개 — poiId로 사진을 받고 shortName을 라벨로 쓴다
         .andExpect(jsonPath("$.courses[0].spots.length()").value(3))
         .andExpect(jsonPath("$.courses[0].spots[0].seq").value(1))
@@ -90,6 +95,8 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courseCode").value("3-01"))
         .andExpect(jsonPath("$.spotCount").value(3))
         .andExpect(jsonPath("$.approxTotalText").value("약 8시간 30분"))
+        .andExpect(jsonPath("$.busMinTotal").value(114))     // legs 합과 같아야 한다
+        .andExpect(jsonPath("$.busTotalText").value("약 1시간 54분"))
         .andExpect(jsonPath("$.legCount").value(4))      // "· 4구간"
         .andExpect(jsonPath("$.originName").value("고현터미널"))
         .andExpect(jsonPath("$.service").value("WEEKDAY")) // 헤더 '평일' 칩
