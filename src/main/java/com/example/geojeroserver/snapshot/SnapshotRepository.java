@@ -72,8 +72,9 @@ public class SnapshotRepository {
           if (status == StopStatus.TEXT && !"[미확인]".equals(rs.getString("raw_text"))) {
             status = StopStatus.EMPTY;
           }
+          // raw 는 스팟 계층이 경로 문장 속 시각("대계(06:00)")을 꺼낼 때만 쓴다(SpotLayer).
           acc.stops.add(new TripStop(rs.getString("stop_name"), status,
-              rs.getObject("depart_min", Integer.class)));
+              rs.getObject("depart_min", Integer.class), rs.getString("raw_text")));
         },
         date, date);
 

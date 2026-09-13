@@ -11,11 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * 게이트 3: 적재된 추천 코스(V17)가 팀원 산출물과 어긋나지 않는지 지킨다.
+ * 게이트 3: 적재된 추천 코스(V20)가 팀원 산출물과 어긋나지 않는지 지킨다.
  *
- * 왜 필요한가 — 코스는 앞으로 두 번 더 바뀐다. (1) 배 시간표를 받으면 내도 코스 3개가
- * 들어오고, (2) 팀원이 환승 금지로 다시 계산하면 전량 교체된다. 그때 **조용히 깨지는 것**을
- * 막는 게 이 테스트다. 여기가 빨개지면 "코스가 바뀌었다"는 신호이고, 기대값을 원문과
+ * 왜 필요한가 — 코스는 다시 바뀐다. 2026-09-13 에 팀원이 환승 없이 다시 계산해 전량 교체했고
+ * (V20: 직행만 · 섬 코스 제외 · 23개), 배 시간표를 받으면 지심도·내도 코스가 들어온다. 그때
+ * **조용히 깨지는 것**을 막는 게 이 테스트다. 여기가 빨개지면 "코스가 바뀌었다"는 신호이고, 기대값을 원문과
  * 대조해 고치면 된다 — 원문 대조 없이 숫자만 맞추면 게이트가 죽는다(기준문서 §6).
  */
 @SpringBootTest
@@ -27,11 +27,21 @@ class CourseDataTest {
     return jdbc.queryForList(sql, args);
   }
 
-  @Test void 추천코스는_3개이고_코드가_3x01_5x01_5x07이다() {
+  @Test void 추천코스는_23개이고_코드가_스팟수_순위순이다() { // recommended_courses.txt 확정본 그대로
     var codes = jdbc.queryForList("""
         SELECT course_code FROM courses
         WHERE course_code IS NOT NULL ORDER BY spot_count, rank_no""", String.class);
-    assertEquals(List.of("3-01", "5-01", "5-07"), codes);
+    assertEquals(List.of(
+        "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10",
+        "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10",
+        "5-01", "5-02", "5-03"), codes);
+  }
+
+  /** V17 코스 3개는 새 목록에 같은 코스가 있어 id 를 그대로 쓴다 — 저장 일정 FK 가 가리킬 수 있다. */
+  @Test void V17_코스는_같은_id로_남는다() {
+    assertEquals(List.of("3-01", "5-01", "5-03"), jdbc.queryForList(
+        "SELECT course_code FROM courses WHERE course_id IN (101, 102, 103) ORDER BY course_id",
+        String.class));
   }
 
   @Test void 검증코스_3종은_그대로_남아있다() { // §3 코스 — CourseSeeder 소유, saved_trips FK 원천
@@ -40,13 +50,15 @@ class CourseDataTest {
   }
 
   /**
-   * 4곳 칩이 비어 있다는 사실을 못박는다 — 화면에 빈 상태가 필요한 이유다.
-   * 배 시간표를 받아 4-02·4-05를 넣으면 이 테스트가 깨져서 알려준다.
+   * 스팟 수별 개수 — 3·4곳은 순위 상위 10개, 5곳은 가능한 3개 전부(섬 코스 제외 후).
+   * 배 시간표를 받아 섬 코스를 넣으면 이 테스트가 깨져서 알려준다.
    */
-  @Test void 네곳_코스는_아직_없다_배시간표_대기() {
-    assertEquals(0, jdbc.queryForObject("""
-        SELECT count(*) FROM courses WHERE course_code IS NOT NULL AND spot_count = 4""",
-        Integer.class));
+  @Test void 스팟수별_코스는_3곳10_4곳10_5곳3이다() {
+    for (int[] e : new int[][] {{3, 10}, {4, 10}, {5, 3}}) {
+      assertEquals(e[1], jdbc.queryForObject("""
+          SELECT count(*) FROM courses WHERE course_code IS NOT NULL AND spot_count = ?""",
+          Integer.class, e[0]), e[0] + "곳 코스 수");
+    }
   }
 
   /** 구간 체인이 끊기면 화면이 타임라인을 그릴 수 없다. 스팟 N곳이면 구간은 N+1개다. */
@@ -102,10 +114,12 @@ class CourseDataTest {
 
   /**
    * ★ 추정 시각이 어디에 붙어 있는지 못박는다 — 이게 이 서비스의 명제다.
-   * 원문 시간표에 시각 칸이 없는 정류장은 도장포뿐이고(이 3개 코스 기준),
-   * 하차는 뒤 정류장(상한)·승차는 앞 정류장(하한)이라 버스를 놓치지 않는 쪽으로만 틀린다.
+   * 원문 시간표에 시각 칸이 없는 정류장(이 23개 코스에서는 도장포·대금교차로·맹종죽테마파크)에만
+   * 붙고, 거기서는 **반드시** 붙는다. 하차는 뒤 정류장(상한)·승차는 앞 정류장(하한)이라
+   * 버스를 놓치지 않는 쪽으로만 틀린다. 4-08 의 맹종죽테마파크 → 대금교차로 는 양끝이 다 그런
+   * 정류장이라 승·하차가 함께 추정인 유일한 승차다.
    */
-  @Test void 추정시각은_도장포_구간에만_붙어있다() {
+  @Test void 추정시각은_시각칸이_없는_정류장에만_붙어있다() {
     var est = rows("""
         SELECT c.course_code, r.route_no, r.board_stop, r.board_estimated,
                r.alight_stop, r.alight_estimated
@@ -116,15 +130,20 @@ class CourseDataTest {
           AND (r.board_estimated OR r.alight_estimated)
         ORDER BY c.spot_count, c.rank_no, l.leg_seq""");
 
-    assertEquals(6, est.size(), "코스 3개 × 도장포 승·하차 2건 = 6건이어야 한다");
-    for (var e : est) {
-      boolean boardEst = (Boolean) e.get("board_estimated");
-      String stop = (String) e.get(boardEst ? "board_stop" : "alight_stop");
-      assertEquals("도장포", stop,
-          "추정이 도장포 아닌 정류장에 붙어 있다: " + e);
-      assertNotEquals(boardEst, (Boolean) e.get("alight_estimated"),
-          "한 승차에서 승·하차가 동시에 추정이면 근거를 다시 봐야 한다: " + e);
+    assertEquals(35, est.size(), "추정이 붙은 승차 수(recommended_courses.json 과 같다)");
+    var noTimeCell = java.util.Set.of("도장포", "대금교차로", "맹종죽테마파크");
+    for (var r : rows("""
+        SELECT c.course_code, r.board_stop, r.board_estimated, r.alight_stop, r.alight_estimated
+        FROM course_rides r JOIN course_legs l ON l.leg_id = r.leg_id
+        JOIN courses c ON c.course_id = l.course_id WHERE c.course_code IS NOT NULL""")) {
+      assertEquals(noTimeCell.contains((String) r.get("board_stop")), r.get("board_estimated"),
+          "승차 추정 표시가 정류장과 맞지 않는다: " + r);
+      assertEquals(noTimeCell.contains((String) r.get("alight_stop")), r.get("alight_estimated"),
+          "하차 추정 표시가 정류장과 맞지 않는다: " + r);
     }
+    assertEquals(1, est.stream().filter(e ->
+        (Boolean) e.get("board_estimated") && (Boolean) e.get("alight_estimated")).count(),
+        "양끝이 다 추정인 승차는 4-08 맹종죽테마파크 → 대금교차로 하나다");
   }
 
   /** 같은 정류장 구간은 조선해양문화관 → 씨월드(둘 다 '신촌')뿐이다. 버스를 타지 않는다. */
@@ -139,7 +158,7 @@ class CourseDataTest {
         JOIN pois pt ON pt.poi_id = l.to_poi_id
         WHERE c.course_code IS NOT NULL AND l.mode = 'SAME_STOP'""");
 
-    assertEquals(2, same.size(), "5-01·5-07 두 건이어야 한다");
+    assertEquals(8, same.size(), "조선해양문화관 → 씨월드를 잇는 코스 8개다");
     for (var s : same) {
       assertEquals("거제조선해양문화관", s.get("frm"));
       assertEquals("거제씨월드", s.get("dst"));

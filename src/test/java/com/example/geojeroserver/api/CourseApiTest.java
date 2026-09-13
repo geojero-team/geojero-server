@@ -12,7 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 /**
  * 코스 API 계약 — 02-2 화면(Figma 442:748)이 이 응답만으로 그려져야 한다.
  *
- * 값은 전부 V17 적재분(팀원 산출물, BIS 원문 2026-08-18 평일)이고 CourseDataTest가
+ * 값은 전부 V20 적재분(팀원 산출물 · 직행만 · 섬 코스 제외, BIS 원문 2026-08-18 평일)이고 CourseDataTest가
  * DB 쪽에서 같은 사실을 지킨다. 여기는 **화면이 받는 모양**을 지킨다.
  */
 @SpringBootTest
@@ -23,16 +23,16 @@ class CourseApiTest {
   // ── 목록: 코스 추천 화면 (446:559) ────────────────────────────────────────
 
   /**
-   * 칩마다 개수를 띄우고 0이면 비활성해야 한다. 4곳이 0인 것은 배 시간표를 아직 못 받아
-   * 내도 코스를 뺐기 때문이다 — 빈 상태 화면이 필요한 근거가 이 숫자다.
+   * 칩마다 개수를 띄우고 0이면 비활성해야 한다. 3·4곳은 순위 상위 10개, 5곳은 섬 코스를 뺀 뒤
+   * 가능한 3개 전부다(V20). 배 시간표를 받아 섬 코스를 넣으면 이 숫자가 바뀐다.
    */
   @Test void 코스목록_칩별_개수를_내려준다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(3))
-        .andExpect(jsonPath("$.counts['3']").value(1))
-        .andExpect(jsonPath("$.counts['4']").value(0))
-        .andExpect(jsonPath("$.counts['5']").value(2));
+        .andExpect(jsonPath("$.courses.length()").value(23))
+        .andExpect(jsonPath("$.counts['3']").value(10))
+        .andExpect(jsonPath("$.counts['4']").value(10))
+        .andExpect(jsonPath("$.counts['5']").value(3));
   }
 
   /** 카드 한 장을 그리는 데 필요한 것이 다 실려야 한다 — 썸네일·순서·9경 수·총 시간. */
@@ -64,24 +64,32 @@ class CourseApiTest {
   @Test void 코스목록_개수로_걸러진다() throws Exception {
     mvc.perform(get("/api/courses?spotCount=5"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(2))
-        .andExpect(jsonPath("$.courses[0].courseCode").value("5-01"))
-        .andExpect(jsonPath("$.courses[1].courseCode").value("5-07"));
+        .andExpect(jsonPath("$.courses.length()").value(3))
+        .andExpect(jsonPath("$.courses[*].courseCode")
+            .value(org.hamcrest.Matchers.contains("5-01", "5-02", "5-03")));
   }
 
-  /** 4곳은 아직 없다. 오류가 아니라 빈 목록이어야 한다 — 화면이 빈 상태를 그린다. */
-  @Test void 코스목록_네곳은_빈_목록이다() throws Exception {
+  /**
+   * 4곳은 이제 10개다 — 전에는 섬(내도) 코스만 있어 0개였고 화면이 빈 상태를 그렸다.
+   * 걸러도 counts 는 전량을 센다(칩이 다른 개수도 보여줘야 한다).
+   */
+  @Test void 코스목록_네곳은_10개이고_순위순이다() throws Exception {
     mvc.perform(get("/api/courses?spotCount=4"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(0))
-        .andExpect(jsonPath("$.counts['4']").value(0));
+        .andExpect(jsonPath("$.courses.length()").value(10))
+        .andExpect(jsonPath("$.courses[0].courseCode").value("4-01"))
+        .andExpect(jsonPath("$.courses[9].courseCode").value("4-10"))
+        .andExpect(jsonPath("$.counts['3']").value(10));
   }
 
   /** §3 검증 코스 3종은 화면에 안 뜬다(추천 코스가 아니다). 목록에 섞이면 안 된다. */
   @Test void 코스목록에_검증코스_3종은_섞이지_않는다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(jsonPath("$.courses[*].courseCode")
-            .value(org.hamcrest.Matchers.contains("3-01", "5-01", "5-07")))
+            .value(org.hamcrest.Matchers.contains(
+                "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10",
+                "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10",
+                "5-01", "5-02", "5-03")))
         .andExpect(jsonPath("$.courses[*].courseId")
             .value(org.hamcrest.Matchers.everyItem(
                 org.hamcrest.Matchers.greaterThan(3))));

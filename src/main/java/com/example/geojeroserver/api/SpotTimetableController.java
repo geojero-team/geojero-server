@@ -1,5 +1,7 @@
 package com.example.geojeroserver.api;
 
+import com.example.geojeroserver.engine.SpotLayer;
+import com.example.geojeroserver.engine.TimeUtil;
 import com.example.geojeroserver.engine.Timetable;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,6 +24,12 @@ import org.springframework.web.server.ResponseStatusException;
  * ★ 내리는 정류장과 시간표를 읽는 정류장이 다를 수 있다 — 조선해양문화관·씨월드는
  * 신촌에서 내리지만 시간표에 신촌 칸이 없어 지세포 시각을 쓴다. 숨기지 않고
  * boardStopDiffers 로 알린다. 숨기면 "지세포 시간표"를 "신촌 시간표"라고 거짓말하는 것이다.
+ *
+ * ★ 2026-09-13: 시각은 **스팟 계층(SpotLayer)** 에서 읽는다. 원문 격자에는 도장포(55번)·대계·
+ * 대금교차로·포로수용소·식물원·옥포대첩기념공원·맹종죽테마파크 칸이 없어, 격자만 읽으면
+ * 코스(55번 · 12분)와 시간표(운행 없음)가 서로 다른 말을 했다. 스팟 계층은 팀원 파이프라인의
+ * 규칙(경로 문장 속 시각 · 앞뒤 정류장으로 감싼 시각)을 그대로 적용하고, 감싼 값은
+ * departures[].estimated 로 알린다. 빈 결과의 이유(시각 미상)는 여전히 격자에서 본다.
  */
 @RestController
 public class SpotTimetableController {
@@ -32,7 +40,9 @@ public class SpotTimetableController {
 
   public record Endpoint(Long poiId, String stop, String name) {}
 
-  public record Departure(String routeNo, String depart, String arrive, Integer durationMin) {}
+  /** estimated 가 참이면 승차 또는 하차 시각이 앞뒤 정류장으로 감싼 값이다(SpotLayer 규칙 3·7). */
+  public record Departure(String routeNo, String depart, String arrive, Integer durationMin,
+      boolean estimated) {}
 
   /**
    * 노선별 소요시간. 섞어 평균을 내면 실제로 운행하지 않는 값이 나온다(engine.md).
@@ -91,26 +101,16 @@ public class SpotTimetableController {
     String origin = reversed ? target.stop() : spotStop;
     String dest = reversed ? spotStop : target.stop();
 
-    var rides = Timetable.rides(snap, origin, dest);
+    // 스팟 계층을 읽는다 — 격자에 칸이 없는 스팟 정류장도 시각이 나온다(클래스 주석 참고).
+    var rides = SpotLayer.rides(snap, origin, dest);
     var deps = new ArrayList<Departure>();
-    for (var r : rides) {
-      deps.add(new Departure(r.routeNo(),
-          com.example.geojeroserver.engine.TimeUtil.minToHHMM(r.departMin()),
-          r.arriveMin() == null ? null
-              : com.example.geojeroserver.engine.TimeUtil.minToHHMM(r.arriveMin()),
-          r.durationMin()));
-    }
+    for (var r : rides) deps.add(departure(r));
 
     Departure next = null;
     if (after != null) {
-      int afterMin = com.example.geojeroserver.engine.TimeUtil.hhmmToMin(after);
+      int afterMin = TimeUtil.hhmmToMin(after);
       next = rides.stream().filter(r -> r.departMin() >= afterMin).findFirst()
-          .map(r -> new Departure(r.routeNo(),
-              com.example.geojeroserver.engine.TimeUtil.minToHHMM(r.departMin()),
-              r.arriveMin() == null ? null
-                  : com.example.geojeroserver.engine.TimeUtil.minToHHMM(r.arriveMin()),
-              r.durationMin()))
-          .orElse(null);
+          .map(SpotTimetableController::departure).orElse(null);
     }
 
     var unknown = deps.isEmpty() ? Timetable.unknownTimeRoutes(snap, origin, dest) : List.<String>of();
@@ -121,6 +121,11 @@ public class SpotTimetableController {
   }
 
   // ── 조립 ──────────────────────────────────────────────────────────────────
+
+  private static Departure departure(SpotLayer.Ride r) {
+    return new Departure(r.routeNo(), TimeUtil.minToHHMM(r.departMin()),
+        TimeUtil.minToHHMM(r.arriveMin()), r.durationMin(), r.estimated());
+  }
 
   private SpotDeparturesRes res(java.util.Map<String, Object> spot, Endpoint target,
       boolean reversed, String date, String dayClass, List<Departure> deps,
