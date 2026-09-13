@@ -12,14 +12,21 @@ public enum ErrorCode {
     // 4xx Business Errors
     // Bad Request(400)
     VALIDATION_FAILED("입력값에 대한 유효성 검사에 실패했습니다.", HttpStatus.BAD_REQUEST),
+    FILE_REQUIRED("사진 파일이 필요합니다.", HttpStatus.BAD_REQUEST),
+    CAPTION_TOO_LONG("한 줄은 %d자까지 쓸 수 있습니다.", HttpStatus.BAD_REQUEST),
+    IMAGE_UNREADABLE("사진을 읽을 수 없습니다.", HttpStatus.BAD_REQUEST),
+    IMAGE_TOO_MANY_PIXELS("사진의 가로·세로가 너무 큽니다.", HttpStatus.BAD_REQUEST),
 
     // Not Found(404)
     USER_NOT_FOUND("해당 사용자를 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
+    POI_NOT_FOUND("사진을 올릴 수 있는 스팟이 아닙니다.", HttpStatus.NOT_FOUND),
+    PHOTO_NOT_FOUND("사진을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 
     // etc 4xx
     INVALID_TOKEN("유효하지 않은 토큰입니다.", HttpStatus.UNAUTHORIZED),
     TOKEN_EXPIRED("만료된 토큰입니다.", HttpStatus.UNAUTHORIZED),
     ACCESS_DENIED("해당 요청에 대한 권한이 없습니다.", HttpStatus.FORBIDDEN),
+    UNSUPPORTED_IMAGE_TYPE("JPEG·PNG 사진만 올릴 수 있습니다.", HttpStatus.UNSUPPORTED_MEDIA_TYPE),
 
     //5xx System Errors
     INTERNAL_SERVER_ERROR("서버 내부에 에러가 발생하였습니다.", HttpStatus.INTERNAL_SERVER_ERROR);
