@@ -26,6 +26,8 @@ class ContractTest {
         // 02-2 코스·스팟시간표 (2026-09-12 추가). 값 검증은 CourseApiTest·SpotTimetableApiTest
         "/api/courses?spotCount=3", "/api/courses/101",
         "/api/pois/4/departures?date=2026-09-14",
+        // 유람선 시간표 (2026-09-14 추가). 값 검증은 FerryApiTest
+        "/api/pois/5/ferries?date=2026-09-14",
         "/api/alerts?date=2026-09-09"}) {
       // /api/me·/api/saved-trips는 로그인 평면 — 비로그인 401 검증은 AuthTripsTest
       mvc.perform(get(url)).andExpect(status().isOk());
