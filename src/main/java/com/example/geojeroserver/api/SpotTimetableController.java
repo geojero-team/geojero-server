@@ -61,7 +61,29 @@ public class SpotTimetableController {
       String firstDeparture, String lastDeparture,
       Departure next, List<RouteSummary> byRoute,
       String emptyReason, List<String> unknownTimeRoutes,
-      String source, String baseDate) {}
+      String source, String baseDate, Boarding boarding) {}
+
+  // ── 타는 곳 (2026-09-14, V25·V26) ──────────────────────────────────────────
+
+  /** 이 구간의 출발 쪽. kind 는 SPOT 또는 TERMINAL(고현터미널). 거리는 이 좌표에서 잰다. */
+  public record BoardingPlace(String name, String kind, double lat, double lng) {}
+
+  /** 대표 핀 — 같은 정류장을 쓰는 노선을 묶는다. routes 는 byRoute 순서. */
+  public record BoardingStop(String nodeId, String name, double lat, double lng, int distanceM,
+      List<String> routes) {}
+
+  /**
+   * 대표 핀과 다른 정류장에서 타는 편. mainNodeId 가 있으면 그 노선 대표 핀의 건너편(gapM),
+   * 없으면 그 노선은 편마다 타는 쪽이 달라 대표 핀이 없다(김영삼 생가 32번).
+   */
+  public record BoardingException(String routeNo, String depart, String nodeId, String name,
+      double lat, double lng, int distanceM, String mainNodeId, Integer gapM) {}
+
+  /** 핀이 없는 노선. reason: TOO_FAR · NO_STOP_NAME · WRONG_DIRECTION · NOT_COLLECTED(표에 그 구간·노선이 없다). */
+  public record Unresolved(String routeNo, String reason) {}
+
+  public record Boarding(BoardingPlace from, List<BoardingStop> stops,
+      List<BoardingException> exceptions, List<Unresolved> unresolved, String source) {}
 
   private final JdbcTemplate jdbc;
   private final SnapshotService snapshots;
@@ -95,7 +117,7 @@ public class SpotTimetableController {
     // 스팟 쪽 정류장이 원문 격자에 없으면 시각을 낼 수 없다. 빈 목록 + 이유를 준다.
     if (spotStop == null) {
       return res(spot, target, reversed, date, snap.dayClass().name(),
-          List.of(), null, List.of(), "NO_STOP_IN_TIMETABLE");
+          List.of(), null, List.of(), "NO_STOP_IN_TIMETABLE", null);
     }
 
     String origin = reversed ? target.stop() : spotStop;
@@ -116,8 +138,91 @@ public class SpotTimetableController {
     var unknown = deps.isEmpty() ? Timetable.unknownTimeRoutes(snap, origin, dest) : List.<String>of();
     String reason = !deps.isEmpty() ? null : (unknown.isEmpty() ? "NO_SERVICE" : "UNKNOWN_TIME");
 
+    // 출발 쪽·가는 쪽을 poi 로 — 고현터미널은 poi_kind TERMINAL 행이다(V22).
+    Long terminal = terminalPoiId();
+    Long fromPoi = reversed ? terminal : poiId;
+    Long toPoi = reversed ? Long.valueOf(poiId) : (toPoiId != null ? toPoiId : terminal);
+    var boarding = deps.isEmpty() || fromPoi == null || toPoi == null
+        ? null : boarding(fromPoi, toPoi, byRoute(deps), deps);
+
     return res(spot, target, reversed, date, snap.dayClass().name(),
-        deps, next, unknown, reason);
+        deps, next, unknown, reason, boarding);
+  }
+
+  /**
+   * 타는 곳 — 이 구간 byRoute 의 노선마다 V26 표에서 정류장을 찾는다.
+   *
+   * 예외 편은 **그날 시간표에 있는 편만** 싣는다. 휴일에 없는 편의 "건너편에서 타요"를 말하면 없는 버스를 안내하는 것이다.
+   * 표에 없는 노선은 추측하지 않고 NOT_COLLECTED 로 말한다.
+   */
+  private Boarding boarding(long fromPoi, long toPoi, List<RouteSummary> routes, List<Departure> deps) {
+    var place = jdbc.queryForObject("""
+        SELECT short_name, poi_kind::text, lat, lng FROM pois WHERE poi_id = ?""",
+        (rs, i) -> new BoardingPlace(rs.getString(1), "TERMINAL".equals(rs.getString(2)) ? "TERMINAL" : "SPOT",
+            rs.getDouble(3), rs.getDouble(4)), fromPoi);
+
+    var rows = new LinkedHashMap<String, java.util.Map<String, Object>>();
+    for (var r : jdbc.queryForList("""
+        SELECT route_no, status, reason_code, node_id, stop_name, lat::float8 AS lat, lng::float8 AS lng,
+               distance_m, source
+        FROM boarding_stops WHERE from_poi_id = ? AND to_poi_id = ?""", fromPoi, toPoi)) {
+      rows.put((String) r.get("route_no"), r);
+    }
+
+    var stops = new LinkedHashMap<String, BoardingStop>();
+    var unresolved = new ArrayList<Unresolved>();
+    for (var route : routes) {
+      var r = rows.get(route.routeNo());
+      if (r == null) {
+        unresolved.add(new Unresolved(route.routeNo(), "NOT_COLLECTED"));
+        continue;
+      }
+      switch ((String) r.get("status")) {
+        case "RESOLVED" -> {
+          String node = (String) r.get("node_id");
+          var existing = stops.get(node);
+          var names = new ArrayList<>(existing == null ? List.<String>of() : existing.routes());
+          names.add(route.routeNo());
+          stops.put(node, new BoardingStop(node, (String) r.get("stop_name"),
+              ((Number) r.get("lat")).doubleValue(), ((Number) r.get("lng")).doubleValue(),
+              ((Number) r.get("distance_m")).intValue(), List.copyOf(names)));
+        }
+        case "UNRESOLVED" -> unresolved.add(new Unresolved(route.routeNo(), (String) r.get("reason_code")));
+        default -> { /* SPLIT — 대표 핀 없이 아래 예외 편만 */ }
+      }
+    }
+
+    var todays = new java.util.HashSet<String>();
+    for (var d : deps) todays.add(d.routeNo() + " " + d.depart());
+    var order = routes.stream().map(RouteSummary::routeNo).toList();
+    var exceptions = new ArrayList<BoardingException>();
+    for (var e : jdbc.queryForList("""
+        SELECT e.route_no, to_char(e.depart_time, 'HH24:MI') AS depart, e.node_id, e.stop_name,
+               e.lat::float8 AS lat, e.lng::float8 AS lng, e.distance_m, e.gap_m, s.node_id AS main_node
+        FROM boarding_exceptions e
+        JOIN boarding_stops s USING (from_poi_id, to_poi_id, route_no)
+        WHERE e.from_poi_id = ? AND e.to_poi_id = ?
+        ORDER BY e.depart_time""", fromPoi, toPoi)) {
+      String routeNo = (String) e.get("route_no");
+      if (!order.contains(routeNo) || !todays.contains(routeNo + " " + e.get("depart"))) continue;
+      exceptions.add(new BoardingException(routeNo, (String) e.get("depart"), (String) e.get("node_id"),
+          (String) e.get("stop_name"), ((Number) e.get("lat")).doubleValue(), ((Number) e.get("lng")).doubleValue(),
+          ((Number) e.get("distance_m")).intValue(), (String) e.get("main_node"),
+          e.get("gap_m") == null ? null : ((Number) e.get("gap_m")).intValue()));
+    }
+    exceptions.sort(java.util.Comparator.comparingInt((BoardingException x) -> order.indexOf(x.routeNo()))
+        .thenComparing(BoardingException::depart));
+
+    String source = rows.values().stream().map(r -> (String) r.get("source")).findFirst()
+        .orElseGet(() -> jdbc.queryForList("SELECT source FROM boarding_stops LIMIT 1", String.class)
+            .stream().findFirst().orElse("TAGO"));
+    return new Boarding(place, List.copyOf(stops.values()), List.copyOf(exceptions), List.copyOf(unresolved),
+        "국토교통부 TAGO 정류소 좌표 · " + source.replaceFirst("^TAGO\\s*", ""));
+  }
+
+  private Long terminalPoiId() {
+    return jdbc.queryForList("SELECT poi_id FROM pois WHERE poi_kind = 'TERMINAL' ORDER BY poi_id LIMIT 1", Long.class)
+        .stream().findFirst().orElse(null);
   }
 
   // ── 조립 ──────────────────────────────────────────────────────────────────
@@ -129,7 +234,7 @@ public class SpotTimetableController {
 
   private SpotDeparturesRes res(java.util.Map<String, Object> spot, Endpoint target,
       boolean reversed, String date, String dayClass, List<Departure> deps,
-      Departure next, List<String> unknown, String reason) {
+      Departure next, List<String> unknown, String reason, Boarding boarding) {
     String boardStop = (String) spot.get("timetable_stop");
     String alight = (String) spot.get("alight_label");
     // 뒤집힌 방향(고현 → 스팟)에서는 고현터미널에서 타므로 스팟의 하차 이름과 비교할 일이 없다.
@@ -145,7 +250,7 @@ public class SpotTimetableController {
         deps.isEmpty() ? null : deps.get(0).depart(),
         deps.isEmpty() ? null : deps.get(deps.size() - 1).depart(),
         next, byRoute(deps), reason, unknown,
-        SOURCE, baseDate());
+        SOURCE, baseDate(), boarding);
   }
 
   /**
