@@ -131,6 +131,18 @@ class VisitorPhotoApiTest {
         .andExpect(jsonPath("$.code").value("POI_NOT_FOUND"));
   }
 
+  /** 고현터미널(V22)은 스팟이 아니지만 홈 지도에서 스팟처럼 펼쳐지고 방문자 사진 칸이 있다(2026-09-13 사용자 결정). */
+  @Test void 고현터미널은_사진_칸이_있다_목록_200_올리기_201() throws Exception {
+    long terminal = jdbc.queryForObject("SELECT poi_id FROM pois WHERE poi_kind = 'TERMINAL'", Long.class);
+    mvc.perform(get("/api/pois/{poiId}/visitor-photos", terminal))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.poiId").value((int) terminal));
+
+    upload(token(OWNER), terminal, TestImages.jpeg(40, 30), "터미널 앞")
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.caption").value("터미널 앞"));
+  }
+
   // ── 인증: Spring Security 가 permitAll 이라 컨트롤러가 막는다 ─────────────────
 
   /** 쓰기 핸들러에서 require() 한 줄만 빠져도 로그인 없는 쓰기가 열린다. 엔드포인트마다 지킨다. */
@@ -500,7 +512,8 @@ class VisitorPhotoApiTest {
 
   long nonSpotPoi() {
     return jdbc.queryForObject(
-        "SELECT poi_id FROM pois WHERE theme IS NULL ORDER BY poi_id LIMIT 1", Long.class);
+        "SELECT poi_id FROM pois WHERE theme IS NULL AND poi_kind <> 'TERMINAL' ORDER BY poi_id LIMIT 1",
+        Long.class);
   }
 
   long missingPoi() {

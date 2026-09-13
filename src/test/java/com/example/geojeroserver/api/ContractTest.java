@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** 계약 v0 재현 검증 — 값은 전부 회귀에서 검증된 실데이터. */
@@ -14,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class ContractTest {
   @Autowired MockMvc mvc;
+  @Autowired JdbcTemplate jdbc;
 
   @Test void 전_GET_엔드포인트_200() throws Exception {
     for (String url : new String[] {
@@ -38,7 +40,7 @@ class ContractTest {
   @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(22)) // 13 + V14 권역 스팟 9곳
+        .andExpect(jsonPath("$.pois.length()").value(23)) // 13 + V14 권역 스팟 9곳 + V22 고현터미널
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
@@ -92,6 +94,35 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(17)));
   }
 
+  /**
+   * 고현터미널 — 모든 코스의 출발 지점을 홈 지도에 찍는다(V22, 2026-09-13). 스팟이 아니다(theme 없음).
+   * 좌표는 TAGO 정류소 '터미널(일반)' GJB500 원문(34.89061475, 128.62425069)을 numeric(10,7)로 반올림한 값이다.
+   * 지도에 찍히는 값이라 자릿수까지 못박는다.
+   */
+  @Test void POI목록_고현터미널은_theme_없는_TERMINAL로_TAGO_좌표와_함께_실린다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL')]", org.hamcrest.Matchers.hasSize(1)))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL')].name").value("고현터미널"))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL')].shortName").value("고현터미널"))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL')].lat").value(34.8906148))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL')].lng").value(128.6242507))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL' && @.theme == null)]",
+            org.hamcrest.Matchers.hasSize(1)))
+        .andExpect(jsonPath("$.pois[?(@.kind == 'TERMINAL' && @.region == null && @.category == null)]",
+            org.hamcrest.Matchers.hasSize(1)));
+  }
+
+  /** 터미널은 TourAPI 장소가 아니다 — 상세가 TourAPI·관광사진을 부르지 않고 사진 없이 돈다. */
+  @Test void POI상세_고현터미널은_TourAPI_없이_사진_0장() throws Exception {
+    long id = jdbc.queryForObject("SELECT poi_id FROM pois WHERE poi_kind = 'TERMINAL'", Long.class);
+    mvc.perform(get("/api/pois/{id}", id))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.kind").value("TERMINAL"))
+        .andExpect(jsonPath("$.detail.source").value("FALLBACK"))
+        .andExpect(jsonPath("$.detail.images.length()").value(0));
+  }
+
   /** 권역이 빠진 스팟이 있으면 카드에 '남부권 · 해수욕장' 자리가 비어 나간다. */
   @Test void 화면에_뜨는_스팟은_권역이_다섯_갈래로_채워져_있다() throws Exception {
     mvc.perform(get("/api/pois"))
@@ -114,7 +145,7 @@ class ContractTest {
   @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
     mvc.perform(get("/api/pois?withImages=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(22))
+        .andExpect(jsonPath("$.pois.length()").value(23))
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
   }
 

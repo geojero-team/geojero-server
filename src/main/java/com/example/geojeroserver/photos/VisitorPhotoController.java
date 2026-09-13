@@ -170,9 +170,13 @@ public class VisitorPhotoController {
     return uid;
   }
 
-  /** 화면에 나오는 17곳(theme IS NOT NULL)만 사진 칸이 있다. queryForObject 는 빈 결과에서 500 이라 쓰지 않는다. */
+  /**
+   * 화면에 나오는 17곳(theme IS NOT NULL)과 고현터미널(V22 — 홈 지도에서 스팟처럼 펼쳐진다)만 사진 칸이 있다.
+   * queryForObject 는 빈 결과에서 500 이라 쓰지 않는다.
+   */
   private void requireSpot(long poiId) {
-    if (jdbc.queryForList("SELECT 1 FROM pois WHERE poi_id = ? AND theme IS NOT NULL",
+    if (jdbc.queryForList(
+        "SELECT 1 FROM pois WHERE poi_id = ? AND (theme IS NOT NULL OR poi_kind = 'TERMINAL')",
         Integer.class, poiId).isEmpty()) {
       throw new BusinessException(ErrorCode.POI_NOT_FOUND);
     }
