@@ -101,6 +101,30 @@ class SpotLayerTest {
     assertTrue(r.get(0).estimated());
   }
 
+  /**
+   * 추정이 **어느 쪽**인지 — 화면이 시각 칸에 「추정」을 붙이는 것은 출발 시각이 추정일 때뿐이다.
+   * estimated 하나로는 도착만 추정인 편(고현 → 도장포 · 고현 → 대계)의 확정 출발 시각을 추정이라고 말하게 된다.
+   */
+  @Test void 출발_시각이_추정인지는_따로_알린다() {
+    var back = SpotLayer.rides(snap(trip("55", "해금강=07:35", "학동=07:47", "고현=08:30")), "도장포", "고현");
+    assertTrue(back.get(0).departEstimated(), "도장포에서 탈 때는 해금강 시각 — 출발이 추정");
+
+    var toDojangpo = SpotLayer.rides(snap(trip("55", "고현=06:25", "학동=07:05", "해금강=07:15")), "고현", "도장포");
+    assertTrue(toDojangpo.get(0).estimated());
+    assertFalse(toDojangpo.get(0).departEstimated(), "고현 06:25는 원문 칸 — 도착만 추정");
+
+    var toDaegye = SpotLayer.rides(snap(trip("2000", "고현=06:00", "대계=07:00")), "고현", "대계");
+    assertTrue(toDaegye.get(0).estimated());
+    assertFalse(toDaegye.get(0).departEstimated(), "급행 2000번은 대계 도착만 추정");
+  }
+
+  @Test void 같은_버스로_합칠_때_출발_추정도_합친다() { // 규칙 6 — 한쪽 시트만 감쌌어도 추정으로 남긴다
+    var s = snap(trip("55", "해금강=07:35", "고현=08:30"), trip("55", "해금강=07:35", "고현=08:28"));
+    var r = SpotLayer.rides(s, "도장포", "고현");
+    assertEquals(1, r.size());
+    assertTrue(r.get(0).departEstimated());
+  }
+
   @Test void 원문_격자는_건드리지_않는다() { // 회귀 게이트가 읽는 Timetable 은 그대로다
     var s = snap(trip("55", "고현=06:25", "학동=07:05", "해금강=07:15"));
     assertTrue(Timetable.rides(s, "학동", "도장포").isEmpty());

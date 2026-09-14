@@ -40,9 +40,13 @@ public class SpotTimetableController {
 
   public record Endpoint(Long poiId, String stop, String name) {}
 
-  /** estimated 가 참이면 승차 또는 하차 시각이 앞뒤 정류장으로 감싼 값이다(SpotLayer 규칙 3·7). */
+  /**
+   * estimated 가 참이면 승차 또는 하차 시각이 앞뒤 정류장으로 감싼 값이다(SpotLayer 규칙 3·7).
+   * departEstimated 는 **depart(승차 시각)** 가 감싼 값인지다 — 고현 → 바람의언덕은 도착만 추정이라
+   * estimated 는 참이어도 06:25 출발은 원문 칸 그대로다. 화면이 시각에 추정 표시를 붙일 때 이것을 본다(2026-09-14).
+   */
   public record Departure(String routeNo, String depart, String arrive, Integer durationMin,
-      boolean estimated) {}
+      boolean estimated, boolean departEstimated) {}
 
   /**
    * 노선별 소요시간. 섞어 평균을 내면 실제로 운행하지 않는 값이 나온다(engine.md).
@@ -217,7 +221,7 @@ public class SpotTimetableController {
         .orElseGet(() -> jdbc.queryForList("SELECT source FROM boarding_stops LIMIT 1", String.class)
             .stream().findFirst().orElse("TAGO"));
     return new Boarding(place, List.copyOf(stops.values()), List.copyOf(exceptions), List.copyOf(unresolved),
-        "국토교통부 TAGO 정류소 좌표 · " + source.replaceFirst("^TAGO\\s*", ""));
+        "정류소 좌표 국토교통부 TAGO · " + source.replaceFirst("^TAGO\\s*", ""));
   }
 
   private Long terminalPoiId() {
@@ -229,7 +233,7 @@ public class SpotTimetableController {
 
   private static Departure departure(SpotLayer.Ride r) {
     return new Departure(r.routeNo(), TimeUtil.minToHHMM(r.departMin()),
-        TimeUtil.minToHHMM(r.arriveMin()), r.durationMin(), r.estimated());
+        TimeUtil.minToHHMM(r.arriveMin()), r.durationMin(), r.estimated(), r.departEstimated());
   }
 
   private SpotDeparturesRes res(java.util.Map<String, Object> spot, Endpoint target,

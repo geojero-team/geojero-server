@@ -59,8 +59,12 @@ public final class SpotLayer {
 
   private static final Pattern PLACE_TIME = Pattern.compile("([가-힣@]+)\\((\\d{1,2}):(\\d{2})\\)");
 
-  /** 한 번 타는 것. estimated 면 승차 또는 하차 시각이 추정이다(규칙 3·7). */
-  public record Ride(String routeNo, int departMin, int arriveMin, boolean estimated) {
+  /**
+   * 한 번 타는 것. estimated 면 승차 또는 하차 시각이 추정이다(규칙 3·7).
+   * departEstimated 는 그중 **승차 시각**만 — 화면이 시각 칸에 추정이라고 적을 때 쓴다(2026-09-14).
+   */
+  public record Ride(String routeNo, int departMin, int arriveMin, boolean estimated,
+      boolean departEstimated) {
     public int durationMin() {
       return arriveMin - departMin;
     }
@@ -161,19 +165,21 @@ public final class SpotLayer {
           if (!b.stop().equals(to)) continue;
           int ride = b.alight() - a.board();
           if (ride > 0 && (best == null || ride < best.durationMin())) {
-            best = new Ride(t.routeNo(), a.board(), b.alight(), a.estimated() || b.estimated());
+            best = new Ride(t.routeNo(), a.board(), b.alight(), a.estimated() || b.estimated(),
+                a.estimated());
           }
         }
       }
       if (best == null) continue;
       String key = best.routeNo() + "@" + best.departMin();
       var prev = byDepart.get(key);
-      if (prev == null || best.arriveMin() > prev.arriveMin()) {
-        byDepart.put(key, new Ride(best.routeNo(), best.departMin(), best.arriveMin(),
-            best.estimated() || (prev != null && prev.estimated())));
-      } else if (best.estimated() && !prev.estimated()) {
-        byDepart.put(key, new Ride(prev.routeNo(), prev.departMin(), prev.arriveMin(), true));
+      if (prev == null) {
+        byDepart.put(key, best);
+        continue;
       }
+      var later = best.arriveMin() > prev.arriveMin() ? best : prev; // 늦은 도착을 남기고, 추정은 한쪽이라도면 추정
+      byDepart.put(key, new Ride(later.routeNo(), later.departMin(), later.arriveMin(),
+          best.estimated() || prev.estimated(), best.departEstimated() || prev.departEstimated()));
     }
     var out = new ArrayList<>(byDepart.values());
     out.sort(Comparator.comparingInt(Ride::departMin).thenComparing(Ride::routeNo));

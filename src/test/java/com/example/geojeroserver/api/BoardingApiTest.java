@@ -47,7 +47,8 @@ class BoardingApiTest {
         .andExpect(jsonPath("$.boarding.exceptions[0].gapM").value(6))
         .andExpect(jsonPath("$.boarding.exceptions[0].distanceM").value(218))
         .andExpect(jsonPath("$.boarding.unresolved.length()").value(0))
-        .andExpect(jsonPath("$.boarding.source").value("국토교통부 TAGO 정류소 좌표 · 2026-09-13"));
+        // 화면 맨 아래 출처 줄 그대로(Figma 530:281 「정류소 좌표 국토교통부 TAGO · 2026-09-13」)
+        .andExpect(jsonPath("$.boarding.source").value("정류소 좌표 국토교통부 TAGO · 2026-09-13"));
   }
 
   @Test void 예외_편은_그날_시간표에_있는_편과_맞물린다() throws Exception {

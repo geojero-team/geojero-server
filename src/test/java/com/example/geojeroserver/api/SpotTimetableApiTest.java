@@ -181,6 +181,25 @@ class SpotTimetableApiTest {
             .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(true))));
   }
 
+  /**
+   * ★ 출발 시각이 추정인지 따로 준다(2026-09-14, Figma 09-14 개정 스팟 시간표). estimated 는 "승차 또는 하차 중
+   * 하나라도"라서, 고현터미널 → 바람의언덕의 55번 06:25처럼 원문 칸에 있는 출발 시각까지 추정으로 읽힌다.
+   */
+  @Test void 바람의언덕에서_타는_시각은_추정이고_고현에서_타는_시각은_확정이다() throws Exception {
+    mvc.perform(get("/api/pois/1/departures?" + D + "&after=12:20"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.departures[*].departEstimated")
+            .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(true))))
+        .andExpect(jsonPath("$.next.depart").value("12:48"))
+        .andExpect(jsonPath("$.next.departEstimated").value(true));
+    mvc.perform(get("/api/pois/1/departures?" + D + "&from=origin"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.departures[?(@.depart=='06:25')].estimated")
+            .value(org.hamcrest.Matchers.contains(true)))
+        .andExpect(jsonPath("$.departures[*].departEstimated")
+            .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is(false))));
+  }
+
   @Test void 스팟시간표_없는_스팟은_404() throws Exception {
     mvc.perform(get("/api/pois/9999/departures?" + D)).andExpect(status().isNotFound());
   }
