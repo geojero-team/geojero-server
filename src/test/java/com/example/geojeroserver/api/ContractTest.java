@@ -122,7 +122,10 @@ class ContractTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.kind").value("TERMINAL"))
         .andExpect(jsonPath("$.detail.source").value("FALLBACK"))
-        .andExpect(jsonPath("$.detail.images.length()").value(0));
+        .andExpect(jsonPath("$.detail.images.length()").value(0))
+        // 터미널은 내리는 곳이 없다 — 스팟 상세의 「내리는 곳」 줄이 안 그려진다
+        .andExpect(jsonPath("$.alightLabel").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.boardStopDiffers").value(false));
   }
 
   /** 권역이 빠진 스팟이 있으면 카드에 '남부권 · 해수욕장' 자리가 비어 나간다. */
@@ -262,6 +265,23 @@ class ContractTest {
         .andExpect(jsonPath("$.detail.source").value("FALLBACK"))
         .andExpect(jsonPath("$.detail.reason").value("관광정보 확인 실패"))
         .andExpect(jsonPath("$.detail.checkedAt").exists());
+  }
+
+  /**
+   * 스팟 상세의 「내리는 곳」 줄(Figma 02-2 `607:4`, 2026-09-14 밤) — V18의 하차 이름 둘을 상세가 준다.
+   * 거제씨월드는 신촌에서 내리지만 시간표는 지세포 기준이라 둘째 줄(「시간표는 지세포 정류장 기준이에요」)이 필요하고,
+   * 학동몽돌해변의 「학동 정류장」은 「학동」 기준 그대로라 둘째 줄이 없다 — 스팟 시간표의 boardStopDiffers 와 같은 규칙이다.
+   */
+  @Test void POI_상세에_내리는_정류장과_시간표_기준_정류장() throws Exception {
+    mvc.perform(get("/api/pois/18"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.alightLabel").value("신촌 정류장"))
+        .andExpect(jsonPath("$.timetableStop").value("지세포"))
+        .andExpect(jsonPath("$.boardStopDiffers").value(true));
+    mvc.perform(get("/api/pois/4"))
+        .andExpect(jsonPath("$.alightLabel").value("학동 정류장"))
+        .andExpect(jsonPath("$.timetableStop").value("학동"))
+        .andExpect(jsonPath("$.boardStopDiffers").value(false));
   }
 
   @Test void 운영상태_우회2건() throws Exception {

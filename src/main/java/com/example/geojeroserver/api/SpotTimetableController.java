@@ -242,8 +242,7 @@ public class SpotTimetableController {
     String boardStop = (String) spot.get("timetable_stop");
     String alight = (String) spot.get("alight_label");
     // 뒤집힌 방향(고현 → 스팟)에서는 고현터미널에서 타므로 스팟의 하차 이름과 비교할 일이 없다.
-    boolean differs = !reversed && boardStop != null && alight != null
-        && !alight.startsWith(boardStop);
+    boolean differs = !reversed && alightDiffers(boardStop, alight);
 
     return new SpotDeparturesRes(
         ((Number) spot.get("poi_id")).longValue(),
@@ -295,6 +294,15 @@ public class SpotTimetableController {
     return jdbc.queryForObject("""
         SELECT max(based_on)::text FROM timetable_versions
         WHERE source_file LIKE '%.xlsx'""", String.class);
+  }
+
+  /**
+   * 내리는 정류장(alight_label, 「신촌 정류장」)과 시간표를 읽는 정류장(timetable_stop, 「지세포」)이 다른가.
+   * 「학동 정류장」은 「학동」 기준 그대로라 다르지 않다. 스팟 시간표(boardStopDiffers)와 스팟 상세(`607:4` 둘째 줄)가 같이 쓴다 —
+   * 규칙이 두 화면에서 어긋나면 한쪽이 거짓말을 한다.
+   */
+  static boolean alightDiffers(String timetableStop, String alightLabel) {
+    return timetableStop != null && alightLabel != null && !alightLabel.startsWith(timetableStop);
   }
 
   private java.util.Map<String, Object> poi(long poiId) {

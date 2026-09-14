@@ -4,11 +4,19 @@ import java.util.List;
 
 /** TourAPI HTTP 계층 추상 — 테스트에서 목킹하는 유일한 지점. 실패는 예외로. */
 public interface TourApiGateway {
-  /** cpyrhtDivCd는 대표 사진(imageUrl)의 저작권 구분이다 — overview가 아니라. */
-  record TourDetail(String overview, String imageUrl, String cpyrhtDivCd) {
+  /**
+   * cpyrhtDivCd는 대표 사진(imageUrl)의 저작권 구분이다 — overview가 아니라.
+   * addr1은 TourAPI 주소 원문(스팟 상세 주소 줄, Figma 02-2 `607:4`) — 우리 DB에 주소 컬럼이 없어 런타임 값만 쓴다.
+   */
+  record TourDetail(String overview, String imageUrl, String cpyrhtDivCd, String addr1) {
+    /** 주소를 안 보는 호출부(옛 테스트)용. */
+    public TourDetail(String overview, String imageUrl, String cpyrhtDivCd) {
+      this(overview, imageUrl, cpyrhtDivCd, null);
+    }
+
     /** 저작권을 따지지 않는 호출부(사진을 안 보는 테스트)용. */
     public TourDetail(String overview, String imageUrl) {
-      this(overview, imageUrl, null);
+      this(overview, imageUrl, null, null);
     }
   }
 

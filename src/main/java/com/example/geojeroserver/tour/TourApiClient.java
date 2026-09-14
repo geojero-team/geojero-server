@@ -70,6 +70,9 @@ public class TourApiClient {
       // http 이미지는 브라우저가 혼합 콘텐츠로 막고 빈칸만 남는다.
       boolean usable = !"en".equals(lang) && !"Type3".equals(d.cpyrhtDivCd());
       detail.put("imageUrl", usable ? https(d.imageUrl()) : null);
+      // 주소는 addr1 원문 그대로(스팟 상세 주소 줄, Figma 02-2 `607:4`). 빈 값은 null — 화면이 그 줄을 안 그린다.
+      String addr = d.addr1();
+      detail.put("address", addr == null || addr.isBlank() ? null : addr);
       cache.put(key, new CacheEntry(detail, System.currentTimeMillis()));
       return detail;
     } catch (Exception e) {

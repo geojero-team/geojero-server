@@ -26,9 +26,12 @@ public class PoiController {
   private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro,
                      String photoKeyword) {}
   public record PoisRes(List<PoiListItem> pois) {}
+  // alightLabel·timetableStop은 V18의 하차 이름 둘(스팟 상세 「내리는 곳」 줄, Figma 02-2 `607:4`). 주소는 detail.address(TourAPI addr1).
+  // boardStopDiffers는 스팟 시간표와 같은 규칙(SpotTimetableController.alightDiffers) — 참이면 「시간표는 {timetableStop} 정류장 기준이에요」.
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
-                             String checkUrl, String lastDeparture) {}
+                             String checkUrl, String lastDeparture,
+                             String alightLabel, String timetableStop, boolean boardStopDiffers) {}
 
   /** numeric → Double. PgJDBC는 getObject(n, Double.class)를 numeric에 대해 지원하지 않는다. */
   private static Double toDouble(java.math.BigDecimal v) {
@@ -110,6 +113,7 @@ public class PoiController {
     return jdbc.queryForObject("""
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
                p.last_departure_time, p.tour_content_id, p.image_use_ok, p.photo_keyword,
+               p.alight_label, p.timetable_stop,
                (SELECT i.tour_content_id FROM poi_i18n i
                  WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                    AND i.matched_by = 'HUMAN') AS en_content_id
@@ -135,11 +139,14 @@ public class PoiController {
               && !"en".equals(effLang)) {
             extra = tourApi.galleryPhotos(rs.getString("photo_keyword"));
           }
+          String alight = rs.getString("alight_label");
+          String stop = rs.getString("timetable_stop");
           return new PoiDetailRes(rs.getLong("poi_id"), rs.getString("poi_name"),
               rs.getString("poi_kind"), rs.getString("tier"),
               effLang, fallbackLang, withPhotos(detail, useOk, extra),
               rs.getString("check_url"),
-              last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")));
+              last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")),
+              alight, stop, SpotTimetableController.alightDiffers(stop, alight));
         }, poiId);
   }
 

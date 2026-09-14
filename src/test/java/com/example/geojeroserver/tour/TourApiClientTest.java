@@ -191,4 +191,17 @@ class TourApiClientTest {
         () -> { throw new AssertionError("카운터를 건드리면 안 됨"); });
     assertEquals(List.of(), client.images("1875200", "en"));
   }
+
+  /** 스팟 상세의 주소 줄(Figma 02-2 `607:4`)은 TourAPI addr1 원문 그대로다. 빈 값은 null — 화면이 그 줄을 그리지 않는다. */
+  @Test void 주소는_addr1_원문_그대로_빈값은_null() {
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요", null, null, "경상남도 거제시 남부면 어딘가길 1"),
+        () -> true);
+    assertEquals("경상남도 거제시 남부면 어딘가길 1", client.detail("129479", "ko", null).get("address"));
+
+    var blank = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("개요", null, null, " "),
+        () -> true);
+    assertNull(blank.detail("129479", "ko", null).get("address"));
+  }
 }

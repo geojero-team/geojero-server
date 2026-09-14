@@ -48,7 +48,8 @@ public class HttpTourApiGateway implements TourApiGateway {
         .path("items").path("item").path(0);
     return new TourDetail(item.path("overview").asText(null),
         item.path("firstimage").asText(null),
-        item.path("cpyrhtDivCd").asText(null));
+        item.path("cpyrhtDivCd").asText(null),
+        item.path("addr1").asText(null));
   }
 
   /**
