@@ -206,6 +206,61 @@ class CourseDataTest {
     }
   }
 
+  // ── V28: 거제 9경 번호 · 대표 코스 제목·소개 (2026-09-14) ────────────────────
+
+  /** 거제시 공식 「거제 9경」 번호 — 기준문서 §6 표 그대로 7행. 7경(내도)·8경(지심도)은 스팟이 아니다. */
+  @Test void 거제9경_번호는_기준문서_표의_7행이다() {
+    var rows = jdbc.queryForList("""
+        SELECT nine_scenic_no, poi_name FROM pois
+        WHERE nine_scenic_no IS NOT NULL ORDER BY nine_scenic_no""");
+    assertEquals(List.of(
+        "1 해금강", "2 바람의언덕", "3 외도보타니아", "4 학동흑진주몽돌해변",
+        "5 거제식물원", "6 거제도포로수용소유적공원", "9 매미성"),
+        rows.stream().map(r -> r.get("nine_scenic_no") + " " + r.get("poi_name")).toList());
+  }
+
+  /**
+   * 9경 번호(V28 pois)와 코스의 9경 수(nine_scenic_count)가 맞는지 — 대표 코스 순위의 첫 정렬 키다.
+   *
+   * 팀원 파이프라인(V20)은 매미성(9경 9번, 기준문서 §6)을 9경으로 세지 않아 매미성이 든 4-03 · 4-07 · 4-08 이
+   * 하나 적었다. V28 이 공식 번호로 전 코스를 다시 셌다. 팀원이 코스를 다시 적재하면서 세는 법을 안 고치면
+   * 여기서 깨져서 알려준다.
+   */
+  @Test void 코스의_9경_스팟_수는_적재된_9경_수와_맞는다() {
+    for (var c : rows("""
+        SELECT c.course_code, c.nine_scenic_count,
+               (SELECT count(*) FROM course_pois cp JOIN pois p ON p.poi_id = cp.poi_id
+                WHERE cp.course_id = c.course_id AND p.nine_scenic_no IS NOT NULL) AS numbered
+        FROM courses c WHERE c.course_code IS NOT NULL ORDER BY c.course_code""")) {
+      int loaded = ((Number) c.get("nine_scenic_count")).intValue();
+      int numbered = ((Number) c.get("numbered")).intValue();
+      assertEquals(numbered, loaded,
+          c.get("course_code") + ": 9경 번호가 있는 스팟 수와 nine_scenic_count 가 다르다");
+    }
+  }
+
+  /**
+   * 제목·소개는 대표 코스 10개(CourseApiTest 가 지키는 그 10개) + 4-10 에 있다 — 4-10 은 9경 수를 고치기 전
+   * 10위여서 글을 써 뒀고, 코스 상세 제목으로는 그대로 쓰이므로 남긴다.
+   * 코스를 다시 적재해 대표 10개가 바뀌면 글이 엉뚱한 코스에 붙는다 — 여기서 드러난다.
+   * 소개는 카드 한 장에 들어가야 하므로 150자 이하다. Claude 초안이라 사용자가 고칠 수 있다(V28 주석).
+   */
+  @Test void 제목과_소개는_대표코스_10개와_4_10에_있고_소개는_150자_이하다() {
+    var titled = rows("""
+        SELECT course_code, title, intro FROM courses
+        WHERE title IS NOT NULL OR intro IS NOT NULL ORDER BY course_code""");
+    assertEquals(List.of("3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "4-02", "4-03", "4-09", "4-10", "5-01"),
+        titled.stream().map(r -> (String) r.get("course_code")).toList());
+    for (var r : titled) {
+      String title = (String) r.get("title");
+      String intro = (String) r.get("intro");
+      assertNotNull(title, r.get("course_code") + ": 제목이 없다");
+      assertNotNull(intro, r.get("course_code") + ": 소개가 없다");
+      assertTrue(intro.codePointCount(0, intro.length()) <= 150,
+          r.get("course_code") + ": 소개가 150자를 넘는다(" + intro.length() + ")");
+    }
+  }
+
   /** 스팟의 체류 시각이 앞뒤 구간과 이어지는지 — 도착 ≤ 출발이고 체류 분이 그 차이다. */
   @Test void 스팟_체류시각이_앞뒤_구간과_이어진다() {
     for (var s : rows("""
