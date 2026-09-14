@@ -18,9 +18,18 @@ public class PoiController {
   // lat·lng는 좌표 미확보 POI가 있어 nullable(Double). 0.0으로 떨어지면 지도에 유령 핀이 찍힌다.
   // theme·region·category·shortName은 Figma가 분류한 POI만 값이 있고 나머지는 null이다.
   // imageUrl은 withImages=true일 때만 채운다 — TourAPI 실호출이라 기본 경로를 느리게 하지 않는다.
+  // alightLabel·timetableStop·boardStopDiffers는 시간표 탭 목록 둘째 줄(Figma 451:518)용 — 상세(PoiDetailRes)와 같은 값·규칙.
+  // ferryDocks는 배로만 가는 곳(외도보타니아)의 선착장 이름 목록(ferry_links DESTINATION, seq 순). 나머지는 빈 목록.
   public record PoiListItem(long poiId, String name, String shortName, String kind,
                             String theme, String region, String category, String tier,
-                            boolean hasEnglish, Double lat, Double lng, String imageUrl) {}
+                            boolean hasEnglish, Double lat, Double lng, String imageUrl,
+                            String alightLabel, String timetableStop, boolean boardStopDiffers,
+                            List<String> ferryDocks) {
+    PoiListItem withImageUrl(String url) {
+      return new PoiListItem(poiId, name, shortName, kind, theme, region, category, tier,
+          hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks);
+    }
+  }
 
   /** 이미지를 채우는 데만 쓰는 원본 값. 응답에는 나가지 않는다. */
   private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro,
@@ -55,16 +64,26 @@ public class PoiController {
                       WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                         AND i.matched_by = 'HUMAN') AS has_en,
                p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text,
-               p.photo_keyword
+               p.photo_keyword, p.alight_label, p.timetable_stop,
+               (SELECT string_agg(d.short_name, '·' ORDER BY d.seq)
+                  FROM ferry_links l JOIN ferry_docks d ON d.dock_id = l.dock_id
+                 WHERE l.poi_id = p.poi_id AND l.relation = 'DESTINATION') AS ferry_docks
         FROM pois p ORDER BY p.poi_id""",
-        (rs, i) -> new Row(
-            new PoiListItem(rs.getLong("poi_id"), rs.getString("poi_name"),
-                rs.getString("short_name"), rs.getString("poi_kind"), rs.getString("theme"),
-                rs.getString("region"), rs.getString("category"), rs.getString("tier"),
-                rs.getBoolean("has_en"), toDouble(rs.getBigDecimal("lat")),
-                toDouble(rs.getBigDecimal("lng")), null),
-            rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
-            rs.getString("intro_text"), rs.getString("photo_keyword")));
+        (rs, i) -> {
+          String alight = rs.getString("alight_label");
+          String stop = rs.getString("timetable_stop");
+          String docks = rs.getString("ferry_docks");
+          return new Row(
+              new PoiListItem(rs.getLong("poi_id"), rs.getString("poi_name"),
+                  rs.getString("short_name"), rs.getString("poi_kind"), rs.getString("theme"),
+                  rs.getString("region"), rs.getString("category"), rs.getString("tier"),
+                  rs.getBoolean("has_en"), toDouble(rs.getBigDecimal("lat")),
+                  toDouble(rs.getBigDecimal("lng")), null,
+                  alight, stop, SpotTimetableController.alightDiffers(stop, alight),
+                  docks == null ? List.of() : List.of(docks.split("·"))),
+              rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
+              rs.getString("intro_text"), rs.getString("photo_keyword"));
+        });
 
     if (!withImages) return new PoisRes(rows.stream().map(Row::item).toList());
 
@@ -102,9 +121,7 @@ public class PoiController {
       if (!photos.isEmpty()) url = photos.get(0);
     }
     if (url == null) return r.item();
-    var it = r.item();
-    return new PoiListItem(it.poiId(), it.name(), it.shortName(), it.kind(), it.theme(),
-        it.region(), it.category(), it.tier(), it.hasEnglish(), it.lat(), it.lng(), url);
+    return r.item().withImageUrl(url);
   }
 
   @GetMapping("/api/pois/{poiId}")

@@ -73,7 +73,21 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[12].name").value("거제도포로수용소유적공원"))
         .andExpect(jsonPath("$.pois[12].shortName").value("포로수용소"))
         .andExpect(jsonPath("$.pois[12].tier").value("BEST"))
-        .andExpect(jsonPath("$.pois[12].lat").value(34.8764184));
+        .andExpect(jsonPath("$.pois[12].lat").value(34.8764184))
+        // 시간표 탭 목록 둘째 줄(Figma 451:518, 2026-09-14 밤) — 하차 정류장 · 시간표 기준 정류장 · 배로만 가는 곳은 선착장 목록.
+        // 씨월드는 신촌에서 내리지만 시간표는 지세포 기준이라 「신촌 정류장」만 적으면 신촌 시간표로 읽힌다(스팟 시간표와 같은 규칙).
+        .andExpect(jsonPath("$.pois[0].alightLabel").value("도장포 정류장"))
+        .andExpect(jsonPath("$.pois[0].timetableStop").value("도장포"))
+        .andExpect(jsonPath("$.pois[0].boardStopDiffers").value(false))
+        .andExpect(jsonPath("$.pois[0].ferryDocks.length()").value(0))
+        .andExpect(jsonPath("$.pois[17].name").value("거제씨월드"))
+        .andExpect(jsonPath("$.pois[17].alightLabel").value("신촌 정류장"))
+        .andExpect(jsonPath("$.pois[17].timetableStop").value("지세포"))
+        .andExpect(jsonPath("$.pois[17].boardStopDiffers").value(true))
+        // 외도보타니아 — 버스 정류장이 없고 선착장 4곳(ferry_links DESTINATION, seq 순)에서 배로 간다
+        .andExpect(jsonPath("$.pois[4].alightLabel").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.pois[4].ferryDocks")
+            .value(org.hamcrest.Matchers.contains("도장포", "와현", "장승포", "지세포")));
   }
 
   /**
