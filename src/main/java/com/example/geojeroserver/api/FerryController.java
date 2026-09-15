@@ -67,15 +67,29 @@ public class FerryController {
   public record Ferry(String key, String relation, boolean landingOnly, Dock dock, Access access,
       List<Course> courses, List<NextItem> next, List<Row> rows, CoverageInfo coverage) {}
 
+  /**
+   * 도선(V31, 2026-09-15) — 섬으로 들어가는 배(inTimes, 선착장 → 섬) · 나오는 배(outTimes, 섬 → 선착장).
+   * 요청 날짜의 평일/휴일(dayClass)에 맞는 시각만 싣는다. 그날 정해진 시각이 없으면 두 목록이 비고
+   * holidayNote(원문 「5번~8번 (주말 수시운행)」)가 이유다. holidayNote 는 평일에도 실어 「주말은 이렇다」를 알린다.
+   */
+  public record Shuttle(long shuttleId, String dockName, String islandName, String operatorName,
+      String address, String phone, String tripNote, String fareText, String bookingUrl, String notice,
+      String dayClass, List<String> inTimes, List<String> outTimes, String holidayNote,
+      String source, String enteredOn) {}
+
   public record FerriesRes(long poiId, String shortName, boolean hasBusStop, Long toPoiId,
-      boolean toIsFerryDestination, String towardEmptyReason, AsOf asOf, int days, List<Ferry> ferries) {}
+      boolean toIsFerryDestination, String towardEmptyReason, AsOf asOf, int days, List<Ferry> ferries,
+      List<Shuttle> shuttles) {}
 
   private record Link(int dockId, String relation, String quote, String sourceUrl, int seq) {}
 
   private final JdbcTemplate jdbc;
+  // 도선 시각의 평일/휴일 — 버스와 같은 판정을 쓴다(주말 · 공휴일 HOLIDAY). 한 화면의 「평일」 알약이 버스와 배에서 달라지면 안 된다.
+  private final SnapshotService snapshots;
 
-  public FerryController(JdbcTemplate jdbc) {
+  public FerryController(JdbcTemplate jdbc, SnapshotService snapshots) {
     this.jdbc = jdbc;
+    this.snapshots = snapshots;
   }
 
   @GetMapping("/api/pois/{poiId}/ferries")
@@ -128,7 +142,38 @@ public class FerryController {
 
     return new FerriesRes(poiId, (String) spot.get("short_name"), spot.get("timetable_stop") != null,
         toPoiId, toIsDestination, towardEmpty, new AsOf(start.toString(), asOfTime, KST.getId()),
-        window, out);
+        window, out, shuttles(poiId, start));
+  }
+
+  /**
+   * 도선 — 이 스팟으로 가는 선착장마다 하나(V31 shuttle_docks). 외도 유람선과 달리 날짜별 원문이 아니라
+   * 요일별 고정 시각이라, 요청한 날짜의 평일/휴일에 맞는 행(ALL + 그 날의 day_type)만 준다.
+   */
+  private List<Shuttle> shuttles(long poiId, LocalDate date) {
+    var docks = jdbc.queryForList("""
+        SELECT shuttle_id, dock_name, island_name, operator_name, address, phone, trip_note,
+               fare_text, booking_url, notice, holiday_note, source, entered_on
+        FROM shuttle_docks WHERE poi_id = ? ORDER BY shuttle_id""", poiId);
+    if (docks.isEmpty()) return List.of();
+    String dayClass = snapshots.forDate(date.toString()).dayClass().name();
+    var out = new ArrayList<Shuttle>();
+    for (var d : docks) {
+      long id = ((Number) d.get("shuttle_id")).longValue();
+      var in = new ArrayList<String>();
+      var back = new ArrayList<String>();
+      jdbc.query("""
+          SELECT direction, to_char(depart_time, 'HH24:MI') AS t FROM shuttle_departures
+          WHERE shuttle_id = ? AND day_type IN ('ALL', ?) ORDER BY depart_time""",
+          (org.springframework.jdbc.core.RowCallbackHandler) rs ->
+              ("IN".equals(rs.getString("direction")) ? in : back).add(rs.getString("t")),
+          id, dayClass);
+      out.add(new Shuttle(id, (String) d.get("dock_name"), (String) d.get("island_name"),
+          (String) d.get("operator_name"), (String) d.get("address"), (String) d.get("phone"),
+          (String) d.get("trip_note"), (String) d.get("fare_text"), (String) d.get("booking_url"),
+          (String) d.get("notice"), dayClass, List.copyOf(in), List.copyOf(back),
+          (String) d.get("holiday_note"), (String) d.get("source"), d.get("entered_on").toString()));
+    }
+    return out;
   }
 
   private Ferry ferry(String relation, Link link, boolean landingOnly, Access access,

@@ -119,13 +119,14 @@ public class SpotTimetableController {
     var snap = snapshots.forDate(date);
 
     // 스팟 쪽 정류장이 원문 격자에 없으면 시각을 낼 수 없다. 빈 목록 + 이유를 준다.
-    // 배 연결(ferry_links)도 없으면 「원문에 칸이 없다」가 아니라 **아직 시간표를 모으지 않은 곳**이다
-    // (2026-09-15 공곶이·내도 · 지심도 — 도선 시각은 나중에 채운다). 외도보타니아처럼 배로 가는 곳은
+    // 배 연결(외도 유람선 ferry_links · 도선 shuttle_docks)도 없으면 「원문에 칸이 없다」가 아니라
+    // **아직 시간표를 모으지 않은 곳**이다(TIMETABLE_PENDING). 배로 가는 곳(외도보타니아 · V31 부터 내도 · 지심도)은
     // 배 시간표(/ferries)가 답이라 여기선 그대로 NO_STOP_IN_TIMETABLE 이다.
     if (spotStop == null) {
-      Boolean ferryLinked = jdbc.queryForObject(
-          "SELECT EXISTS(SELECT 1 FROM ferry_links WHERE poi_id = ?)", Boolean.class, poiId);
-      String reason = Boolean.TRUE.equals(ferryLinked) ? "NO_STOP_IN_TIMETABLE" : "TIMETABLE_PENDING";
+      Boolean byBoat = jdbc.queryForObject("""
+          SELECT EXISTS(SELECT 1 FROM ferry_links WHERE poi_id = ?)
+              OR EXISTS(SELECT 1 FROM shuttle_docks WHERE poi_id = ?)""", Boolean.class, poiId, poiId);
+      String reason = Boolean.TRUE.equals(byBoat) ? "NO_STOP_IN_TIMETABLE" : "TIMETABLE_PENDING";
       return res(spot, target, reversed, date, snap.dayClass().name(),
           List.of(), null, List.of(), reason, null);
     }
