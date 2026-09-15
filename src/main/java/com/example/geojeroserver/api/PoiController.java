@@ -40,10 +40,13 @@ public class PoiController {
   public record PoisRes(List<PoiListItem> pois) {}
   // alightLabel·timetableStop은 V18의 하차 이름 둘(스팟 상세 「내리는 곳」 줄, Figma 02-2 `607:4`). 주소는 detail.address(TourAPI addr1).
   // boardStopDiffers는 스팟 시간표와 같은 규칙(SpotTimetableController.alightDiffers) — 참이면 「시간표는 {timetableStop} 정류장 기준이에요」.
+  // summary는 우리가 쓴 요약(V29 pois.summary — Claude 초안). TourAPI 원문(detail.overview)은 고치지 않고 그 위에 따로 붙는다.
+  // 국문뿐이라 영문으로 답할 때(effLang=en)는 싣지 않는다.
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
                              String checkUrl, String lastDeparture,
-                             String alightLabel, String timetableStop, boolean boardStopDiffers) {}
+                             String alightLabel, String timetableStop, boolean boardStopDiffers,
+                             String summary) {}
 
   /** numeric → Double. PgJDBC는 getObject(n, Double.class)를 numeric에 대해 지원하지 않는다. */
   private static Double toDouble(java.math.BigDecimal v) {
@@ -134,7 +137,7 @@ public class PoiController {
     return jdbc.queryForObject("""
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
                p.last_departure_time, p.tour_content_id, p.image_use_ok, p.photo_keyword,
-               p.alight_label, p.timetable_stop,
+               p.alight_label, p.timetable_stop, p.summary,
                (SELECT i.tour_content_id FROM poi_i18n i
                  WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                    AND i.matched_by = 'HUMAN') AS en_content_id
@@ -167,7 +170,8 @@ public class PoiController {
               effLang, fallbackLang, withPhotos(detail, useOk, extra),
               rs.getString("check_url"),
               last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")),
-              alight, stop, SpotTimetableController.alightDiffers(stop, alight));
+              alight, stop, SpotTimetableController.alightDiffers(stop, alight),
+              "ko".equals(effLang) ? rs.getString("summary") : null);
         }, poiId);
   }
 
