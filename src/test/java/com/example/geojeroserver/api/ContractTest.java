@@ -52,7 +52,15 @@ class ContractTest {
   @Test void POI목록_화면분류가_응답에_실린다() throws Exception {
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(23)) // 13 + V14 권역 스팟 9곳 + V22 고현터미널
+        .andExpect(jsonPath("$.pois.length()").value(25)) // 13 + V14 권역 스팟 9곳 + V22 고현터미널 + V30 9경 7경·8경
+        // V30 — 9경 7경 「공곶이와 내도」(대표 공곶이 2536196) · 8경 「동백섬 지심도」(128035). 섬·유람선 칸이고,
+        // 정류장·배 연결이 없어 시간표는 준비 중이다(SpotTimetableController TIMETABLE_PENDING).
+        .andExpect(jsonPath("$.pois[23].shortName").value("공곶이·내도"))
+        .andExpect(jsonPath("$.pois[23].nineScenicNo").value(7))
+        .andExpect(jsonPath("$.pois[23].theme").value("CRUISE"))
+        .andExpect(jsonPath("$.pois[23].timetableStop").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.pois[24].shortName").value("지심도"))
+        .andExpect(jsonPath("$.pois[24].nineScenicNo").value(8))
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
         .andExpect(jsonPath("$.pois[0].theme").value("VIEW"))
@@ -112,20 +120,22 @@ class ContractTest {
    * 화면이 말하는 스팟 수와 서버가 분류한 스팟 수가 같아야 한다.
    *
    * V4의 계약이 "화면은 theme 이 NULL 인 POI 를 목록에서 거른다"이므로, theme 가 붙은
-   * 행 수가 곧 화면에 뜨는 스팟 수다. 답은 **17곳**이다 — 거제 9경 기준 8곳(V3~V11)에
-   * 권역별 스팟 9곳(V14, 2026-09-12)을 더한 것이다.
+   * 행 수가 곧 화면에 뜨는 스팟 수다. 답은 **19곳**이다 — 거제 9경 기준 8곳(V3~V11)에
+   * 권역별 스팟 9곳(V14, 2026-09-12)과 9경 7경·8경 두 곳(V30, 2026-09-15 사용자 결정)을 더한 것이다.
    *
    * 숫자가 어긋나면 시드가 늘었거나 컷이 발동한 것이다. 어느 쪽이든
    * 기준문서를 먼저 고치고 이 숫자를 따라 고친다 — 반대 방향은 안 된다.
    */
-  @Test void POI목록_화면에_뜨는_스팟은_17곳이다() throws Exception {
+  @Test void POI목록_화면에_뜨는_스팟은_19곳이다() throws Exception {
+    // 17곳 → 19곳 (V30, 2026-09-15 사용자 결정). 거제 9경 7경 「공곶이와 내도」 · 8경 「동백섬 지심도」를 넣었다 —
+    // V28 은 배편이 없어 뺐지만, 시간표는 준비 중으로 두고 스팟으로는 보이게 하기로 했다.
     // 8곳 → 17곳 (V14, 2026-09-12). 권역별 스팟 9곳을 더했다.
     // 판정을 걷어내고 '우리가 짠 코스'를 보여주기로 하면서 선정 기준이 바뀌었다 —
     // 전역 분산(판정에 유리)에서 권역별 뭉침(코스에 필요)으로. V14 주석 참고.
     mvc.perform(get("/api/pois"))
         .andExpect(status().isOk())
         // ?(@.theme) 는 '키가 있는가'만 보아 null 인 것까지 걸린다. null 비교여야 한다.
-        .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(17)));
+        .andExpect(jsonPath("$.pois[?(@.theme != null)]", org.hamcrest.Matchers.hasSize(19)));
   }
 
   /**
@@ -168,8 +178,9 @@ class ContractTest {
             org.hamcrest.Matchers.hasSize(0)))
         .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '남부권')]",
             org.hamcrest.Matchers.hasSize(5)))
+        // 동부권 5 → 7 (V30): 공곶이·내도 · 지심도 둘 다 일운면이다(외도보타니아와 같은 권역)
         .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '동부권')]",
-            org.hamcrest.Matchers.hasSize(5)))
+            org.hamcrest.Matchers.hasSize(7)))
         .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '북부권')]",
             org.hamcrest.Matchers.hasSize(3)))
         .andExpect(jsonPath("$.pois[?(@.theme != null && @.region == '서부권')]",
@@ -182,7 +193,7 @@ class ContractTest {
   @Test void POI목록_withImages_는_실패해도_목록을_지키다() throws Exception {
     mvc.perform(get("/api/pois?withImages=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.pois.length()").value(23))
+        .andExpect(jsonPath("$.pois.length()").value(25)) // V30 으로 두 곳 늘었다
         .andExpect(jsonPath("$.pois[0].name").value("바람의언덕"));
   }
 
