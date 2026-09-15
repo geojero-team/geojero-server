@@ -127,6 +127,14 @@ public class PoiController {
       var photos = tourApi.galleryPhotos(r.photoKeyword());
       if (!photos.isEmpty()) url = photos.get(0);
     }
+    // 대표 사진도 관광사진도 없으면 상세 추가 사진(detailImage2, Type3 제외) 첫 장(2026-09-15).
+    // 공곶이(V30)가 그렇다 — 대표 사진은 없고 추가 사진 12장이 전부 Type1 인데 카드·지도 핀이 자리 그림이었다.
+    // 목록에서 images 를 부르지 않던 이유(하루 호출 한도)는 지킨다: **위 둘이 다 비고 화면 스팟일 때만** 부르고,
+    // 상세 화면과 같은 캐시(24h)를 쓴다. 카드 사진이 상세 첫 장과 같아지는 것도 덤이다.
+    if (url == null && r.item().theme() != null) {
+      var extra = tourApi.images(r.contentId(), "ko");
+      if (!extra.isEmpty()) url = extra.get(0);
+    }
     if (url == null) return r.item();
     return r.item().withImageUrl(url);
   }
