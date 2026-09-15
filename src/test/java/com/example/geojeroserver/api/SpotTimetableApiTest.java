@@ -42,6 +42,19 @@ class SpotTimetableApiTest {
         .andExpect(jsonPath("$.to.name").value("고현터미널"));
   }
 
+  /**
+   * 정류장도 배 연결(ferry_links)도 없으면 「원문에 칸이 없다」가 아니라 아직 시간표를 모으지 않은 곳이다
+   * (2026-09-15 공곶이·내도 · 지심도). 신선대(11)가 지금 그 모양이다 — 화면 스팟은 아니지만 같은 규칙을 탄다.
+   * 배로 가는 외도보타니아(5)는 연결이 있어 그대로 NO_STOP_IN_TIMETABLE 이다(BoardingApiTest).
+   */
+  @Test void 정류장도_배연결도_없으면_시간표_준비중() throws Exception {
+    mvc.perform(get("/api/pois/11/departures?" + D))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.count").value(0))
+        .andExpect(jsonPath("$.boardStop").doesNotExist())
+        .andExpect(jsonPath("$.emptyReason").value("TIMETABLE_PENDING"));
+  }
+
   /** to를 생략하면 고현터미널이다 — 모든 코스의 복귀 지점이라 기본값으로 쓴다. */
   @Test void 스팟시간표_첫차_막차_횟수() throws Exception {
     mvc.perform(get("/api/pois/4/departures?" + D))
