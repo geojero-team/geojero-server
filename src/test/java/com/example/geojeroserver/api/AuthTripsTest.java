@@ -189,6 +189,30 @@ class AuthTripsTest {
         .andExpect(jsonPath("$.length()").value(0));
   }
 
+  /**
+   * 같은 코스를 두 번 저장하지 않는다(2026-09-15 사용자 요청). 날짜가 달라도 같은 코스다 —
+   * 화면은 저장 날짜를 늘 「오늘」로 보내므로, 날짜로 가르면 다음 날 같은 코스가 또 저장된다.
+   */
+  @Test
+  void 같은_코스를_다시_저장하면_409_목록엔_하나() throws Exception {
+    Long uid = jdbc.queryForObject("""
+        INSERT INTO users (provider, oauth_id) VALUES ('KAKAO', ?)
+        ON CONFLICT (provider, oauth_id) DO UPDATE SET updated_at = now()
+        RETURNING user_id""", Long.class, OAUTH_ID);
+    var cookie = new Cookie("gj_session", sessions.issue(uid).getValue());
+    String first = """
+        {"courseId":1,"travelDate":"2026-09-09","arrivalTime":"08:20","returnTime":"21:10"}""";
+
+    mvc.perform(post("/api/saved-trips").cookie(cookie)
+            .contentType(MediaType.APPLICATION_JSON).content(first))
+        .andExpect(status().isCreated());
+    mvc.perform(post("/api/saved-trips").cookie(cookie)
+            .contentType(MediaType.APPLICATION_JSON).content(first.replace("2026-09-09", "2026-09-10")))
+        .andExpect(status().isConflict());
+    mvc.perform(get("/api/saved-trips").cookie(cookie))
+        .andExpect(jsonPath("$.length()").value(1));
+  }
+
   @Test
   void 저장_알수없는_코스_400() throws Exception {
     Long uid = jdbc.queryForObject("""

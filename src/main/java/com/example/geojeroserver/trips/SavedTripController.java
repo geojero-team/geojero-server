@@ -78,6 +78,17 @@ public class SavedTripController {
     }
     var c = course.get(0);
 
+    // 같은 사용자가 같은 코스를 두 번 저장하지 않는다(2026-09-15 사용자 요청 — 저장한 코스는 추천에서도 빠진다).
+    // 날짜가 달라도 같은 코스다: travelDate 는 화면이 늘 「오늘」로 보내는 값이라 사용자가 고른 것이 아니다.
+    // 유일 제약을 걸지 않는 이유 — 이 요청 전까지 쌓인 중복 행이 운영에 있을 수 있어 마이그레이션이 깨지고,
+    // 그 행을 지우면 사용자 데이터를 건드리게 된다. 새 중복만 여기서 막는다.
+    Boolean already = jdbc.queryForObject(
+        "SELECT EXISTS(SELECT 1 FROM saved_trips WHERE user_id = ? AND course_id = ?)",
+        Boolean.class, uid, body.courseId());
+    if (Boolean.TRUE.equals(already)) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 저장한 코스");
+    }
+
     LocalDate date;
     LocalTime arrival;
     LocalTime ret;
