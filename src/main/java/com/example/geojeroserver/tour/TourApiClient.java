@@ -69,7 +69,11 @@ public class TourApiClient {
       // 사진 한 장 단위다. http로 오는 URL이 섞여 있어 https로 올린다 — 화면이 https라
       // http 이미지는 브라우저가 혼합 콘텐츠로 막고 빈칸만 남는다.
       boolean usable = !"en".equals(lang) && !"Type3".equals(d.cpyrhtDivCd());
-      detail.put("imageUrl", usable ? https(d.imageUrl()) : null);
+      // 대표 사진이 없으면 TourAPI 는 firstimage 를 **빈 문자열**로 준다(공곶이 2536196, 2026-09-15 운영에서 잡음).
+      // 그대로 담으면 호출부가 "사진 있음"으로 보고 관광사진·추가 사진 폴백을 건너뛰어 목록 카드가 자리 그림으로 나가고,
+      // 상세 사진 목록 첫 장이 빈 주소가 되어 깨진다. 없는 것은 null 이다.
+      String first = d.imageUrl();
+      detail.put("imageUrl", usable && first != null && !first.isBlank() ? https(first) : null);
       // 주소는 addr1 원문 그대로(스팟 상세 주소 줄, Figma 02-2 `607:4`). 빈 값은 null — 화면이 그 줄을 안 그린다.
       String addr = d.addr1();
       detail.put("address", addr == null || addr.isBlank() ? null : addr);

@@ -9,6 +9,20 @@ import org.junit.jupiter.api.Test;
 /** 한도 방어 3층 단위 검증 — Spring·DB 무관. */
 class TourApiClientTest {
 
+  /**
+   * TourAPI 는 대표 사진이 없으면 firstimage 를 빈 문자열로 준다(공곶이 2536196, 2026-09-15 운영).
+   * 빈 주소를 사진으로 내보내면 호출부가 관광사진·추가 사진 폴백을 건너뛰어 목록 카드가 자리 그림으로 나가고,
+   * 상세 사진 목록 첫 장이 깨진다. 없는 것은 null 이어야 한다.
+   */
+  @Test void 대표사진이_빈문자열이면_없는것이다() {
+    var client = new TourApiClient(
+        (service, id) -> new TourApiGateway.TourDetail("공곶이 개요", ""),
+        () -> true);
+    var d = client.detail("2536196", "ko", null);
+    assertEquals("TourAPI", d.get("source"));
+    assertNull(d.get("imageUrl"));
+  }
+
   @Test void 실패시_단일폴백_이유와시각() {
     var client = new TourApiClient(
         (service, id) -> { throw new IllegalStateException("TourAPI HTTP 500"); },
