@@ -72,6 +72,21 @@ class ShuttleApiTest {
         .andExpect(jsonPath("$.shuttles[0].holidayNote").value("5번~8번 (주말 수시운행)"));
   }
 
+  /**
+   * 선착장 좌표(V32) — 배 칩의 「타는 곳」 지도 카드. TourAPI 등록값(와현 2776287 · 지심도 터미널 2756617) 또는
+   * 운항사 주소의 카카오 주소 검색값(구조라 도선). numeric(10,7)로 반올림된 값이다.
+   */
+  @Test void 선착장_좌표가_실린다() throws Exception {
+    mvc.perform(get("/api/pois/" + poi("128035") + "/ferries?date=" + MONDAY))
+        .andExpect(jsonPath("$.shuttles[0].dockLat").value(34.8673157))
+        .andExpect(jsonPath("$.shuttles[0].dockLng").value(128.7276451)); // 128.7276450720 → 7자리 반올림
+    mvc.perform(get("/api/pois/" + poi("2536196") + "/ferries?date=" + MONDAY))
+        .andExpect(jsonPath("$.shuttles[0].dockLat").value(34.8063339));
+    mvc.perform(get("/api/pois/" + poi("126581") + "/ferries?date=" + MONDAY))
+        .andExpect(jsonPath("$.ferries[?(@.dock.dockCode == 'WAHYEON')].dock.lat", contains(34.8119048)))
+        .andExpect(jsonPath("$.ferries[?(@.dock.dockCode == 'JISEPO')].dock.lng", contains(128.7036132)));
+  }
+
   /** 도선이 생겼으니 시간표 준비 중이 아니다(외도처럼 배가 답). 목록 둘째 줄 · 스팟 상세 「선착장에서 타요」에 선착장이 실린다. */
   @Test void 도선이_있으면_준비중이_아니고_목록에_선착장이_실린다() throws Exception {
     long naedo = poi("2536196");

@@ -48,7 +48,9 @@ public class FerryController {
 
   public record AsOf(String date, String time, String zone) {}
 
-  public record Dock(String dockCode, String operatorName, String shortName, String address) {}
+  /** lat · lng 는 타는 곳 지도 카드용 선착장 좌표(V32). 없으면 null — 화면이 지도 없이 이름 · 주소만 보인다. */
+  public record Dock(String dockCode, String operatorName, String shortName, String address,
+      Double lat, Double lng) {}
 
   public record Access(String quote, String sourceUrl) {}
 
@@ -75,7 +77,12 @@ public class FerryController {
   public record Shuttle(long shuttleId, String dockName, String islandName, String operatorName,
       String address, String phone, String tripNote, String fareText, String bookingUrl, String notice,
       String dayClass, List<String> inTimes, List<String> outTimes, String holidayNote,
-      String source, String enteredOn) {}
+      String source, String enteredOn, Double dockLat, Double dockLng) {}
+
+  /** numeric → Double. PgJDBC는 numeric 을 Double 로 바로 주지 않는다(PoiController 와 같은 이유). */
+  private static Double toDouble(java.math.BigDecimal v) {
+    return v == null ? null : v.doubleValue();
+  }
 
   public record FerriesRes(long poiId, String shortName, boolean hasBusStop, Long toPoiId,
       boolean toIsFerryDestination, String towardEmptyReason, AsOf asOf, int days, List<Ferry> ferries,
@@ -152,7 +159,7 @@ public class FerryController {
   private List<Shuttle> shuttles(long poiId, LocalDate date) {
     var docks = jdbc.queryForList("""
         SELECT shuttle_id, dock_name, island_name, operator_name, address, phone, trip_note,
-               fare_text, booking_url, notice, holiday_note, source, entered_on
+               fare_text, booking_url, notice, holiday_note, source, entered_on, lat, lng
         FROM shuttle_docks WHERE poi_id = ? ORDER BY shuttle_id""", poiId);
     if (docks.isEmpty()) return List.of();
     String dayClass = snapshots.forDate(date.toString()).dayClass().name();
@@ -171,7 +178,8 @@ public class FerryController {
           (String) d.get("operator_name"), (String) d.get("address"), (String) d.get("phone"),
           (String) d.get("trip_note"), (String) d.get("fare_text"), (String) d.get("booking_url"),
           (String) d.get("notice"), dayClass, List.copyOf(in), List.copyOf(back),
-          (String) d.get("holiday_note"), (String) d.get("source"), d.get("entered_on").toString()));
+          (String) d.get("holiday_note"), (String) d.get("source"), d.get("entered_on").toString(),
+          toDouble((java.math.BigDecimal) d.get("lat")), toDouble((java.math.BigDecimal) d.get("lng"))));
     }
     return out;
   }
@@ -179,8 +187,9 @@ public class FerryController {
   private Ferry ferry(String relation, Link link, boolean landingOnly, Access access,
       LocalDate start, int window, LocalDate asOfDate, Integer asOfMin) {
     var dock = jdbc.queryForObject("""
-        SELECT dock_code, operator_name, short_name, address FROM ferry_docks WHERE dock_id = ?""",
-        (rs, i) -> new Dock(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), link.dockId());
+        SELECT dock_code, operator_name, short_name, address, lat, lng FROM ferry_docks WHERE dock_id = ?""",
+        (rs, i) -> new Dock(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+            toDouble(rs.getBigDecimal(5)), toDouble(rs.getBigDecimal(6))), link.dockId());
 
     var courses = jdbc.query("""
         SELECT course_id, lands_on_oedo, legend_label, course_name, total_min, total_text, oedo_stay_min, booking_url
