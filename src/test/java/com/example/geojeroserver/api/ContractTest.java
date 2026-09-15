@@ -59,6 +59,11 @@ class ContractTest {
         .andExpect(jsonPath("$.pois[9].theme").value("GARDEN"))
         // Figma가 분류한 적 없는 POI는 null이다 — 없는 분류를 만들지 않는다(절대 규칙 1)
         .andExpect(jsonPath("$.pois[5].theme").value(org.hamcrest.Matchers.nullValue()))
+        // V28 — 거제시 공식 9경 번호. 앱이 주황 테두리·「거제9경이란?」 링크를 이 값으로 잇는다(poi_id 를 앱에 박지 않는다).
+        // 2경 「바람의 언덕과 신선대」는 화면 스팟인 바람의언덕에만 붙는다. 9경이 아니면 null.
+        .andExpect(jsonPath("$.pois[0].nineScenicNo").value(2))
+        .andExpect(jsonPath("$.pois[1].nineScenicNo").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.pois[6].nineScenicNo").value(9))
         .andExpect(jsonPath("$.pois[7].theme").value(org.hamcrest.Matchers.nullValue()))
         // V6 — 화면 목록에는 있는데 시드에 없어 사진도 좌표도 못 받던 곳.
         // contentId·좌표는 TourAPI searchKeyword2 실호출로 확인한 값이다.

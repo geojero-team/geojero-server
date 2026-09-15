@@ -20,14 +20,17 @@ public class PoiController {
   // imageUrl은 withImages=true일 때만 채운다 — TourAPI 실호출이라 기본 경로를 느리게 하지 않는다.
   // alightLabel·timetableStop·boardStopDiffers는 시간표 탭 목록 둘째 줄(Figma 451:518)용 — 상세(PoiDetailRes)와 같은 값·규칙.
   // ferryDocks는 배로만 가는 곳(외도보타니아)의 선착장 이름 목록(ferry_links DESTINATION, seq 순). 나머지는 빈 목록.
+  // nineScenicNo는 거제시 공식 9경 번호(V28 pois.nine_scenic_no). 9경이 아니면 null — 앱이 홈 지도 주황 테두리·
+  // 「거제9경이란?」 목록 링크·스팟 시트 배지를 이 값으로 잇는다(앱에 poi_id 를 박지 않는다 — 환경마다 다를 수 있다).
   public record PoiListItem(long poiId, String name, String shortName, String kind,
                             String theme, String region, String category, String tier,
                             boolean hasEnglish, Double lat, Double lng, String imageUrl,
                             String alightLabel, String timetableStop, boolean boardStopDiffers,
-                            List<String> ferryDocks) {
+                            List<String> ferryDocks, Integer nineScenicNo) {
     PoiListItem withImageUrl(String url) {
       return new PoiListItem(poiId, name, shortName, kind, theme, region, category, tier,
-          hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks);
+          hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks,
+          nineScenicNo);
     }
   }
 
@@ -64,7 +67,7 @@ public class PoiController {
                       WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
                         AND i.matched_by = 'HUMAN') AS has_en,
                p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text,
-               p.photo_keyword, p.alight_label, p.timetable_stop,
+               p.photo_keyword, p.alight_label, p.timetable_stop, p.nine_scenic_no,
                (SELECT string_agg(d.short_name, '·' ORDER BY d.seq)
                   FROM ferry_links l JOIN ferry_docks d ON d.dock_id = l.dock_id
                  WHERE l.poi_id = p.poi_id AND l.relation = 'DESTINATION') AS ferry_docks
@@ -80,7 +83,8 @@ public class PoiController {
                   rs.getBoolean("has_en"), toDouble(rs.getBigDecimal("lat")),
                   toDouble(rs.getBigDecimal("lng")), null,
                   alight, stop, SpotTimetableController.alightDiffers(stop, alight),
-                  docks == null ? List.of() : List.of(docks.split("·"))),
+                  docks == null ? List.of() : List.of(docks.split("·")),
+                  rs.getObject("nine_scenic_no", Integer.class)),
               rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
               rs.getString("intro_text"), rs.getString("photo_keyword"));
         });
