@@ -141,9 +141,15 @@ public class VisitorPhotoController {
   @PostMapping("/api/visitor-photos/{photoId}/report")
   public ResponseEntity<Void> report(HttpServletRequest req, @PathVariable long photoId) {
     long uid = requireExistingUser(req);
-    if (jdbc.queryForList("SELECT 1 FROM visitor_photos WHERE photo_id = ?",
-        Integer.class, photoId).isEmpty()) {
+    var owners = jdbc.queryForList("SELECT user_id FROM visitor_photos WHERE photo_id = ?",
+        Long.class, photoId);
+    if (owners.isEmpty()) {
       throw new BusinessException(ErrorCode.PHOTO_NOT_FOUND);
+    }
+    // 내 사진은 신고 대상이 아니다 — 마음에 안 들면 지우면 된다(2026-09-16 사용자 결정).
+    // 화면도 내 사진에는 버튼을 그리지 않지만, 주소로 부를 수 있으므로 여기서도 막는다.
+    if (owners.get(0) == uid) {
+      throw new BusinessException(ErrorCode.ACCESS_DENIED);
     }
     jdbc.update("""
         INSERT INTO visitor_photo_reports (photo_id, user_id) VALUES (?, ?)

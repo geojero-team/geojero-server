@@ -153,6 +153,27 @@ class VisitorPhotoApiTest {
         "SELECT count(*) FROM visitor_photo_reports WHERE photo_id = ?", Integer.class, photoId));
   }
 
+  /**
+   * 내 사진은 신고할 수 없다(2026-09-16 사용자 결정) — 마음에 안 들면 지우면 된다.
+   * 화면이 버튼을 안 그리는 것만으로는 부족하다. 주소로 부를 수 있으므로 서버가 막는다.
+   */
+  @Test void 자기_사진은_신고할_수_없다() throws Exception {
+    long uid = userId(OWNER);
+    long photoId = jdbc.queryForObject("""
+        INSERT INTO visitor_photos (poi_id, user_id, width, height, byte_size)
+        VALUES (?, ?, 1, 1, 1) RETURNING photo_id""", Long.class, spotPoi(), uid);
+
+    mvc.perform(post("/api/visitor-photos/" + photoId + "/report")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token(OWNER)))
+        .andExpect(status().isForbidden());
+
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photos WHERE photo_id = ? AND hidden_at IS NOT NULL",
+        Integer.class, photoId));
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photo_reports WHERE photo_id = ?", Integer.class, photoId));
+  }
+
   /** 비로그인 신고는 401. 누가 신고했는지 남지 않으면 장난 신고를 되짚을 수 없다. */
   @Test void 로그인_없이_신고는_401_없는_사진은_404() throws Exception {
     long photoId = jdbc.queryForObject("""
