@@ -27,12 +27,13 @@ class CourseDataTest {
     return jdbc.queryForList(sql, args);
   }
 
-  @Test void 추천코스는_23개이고_코드가_스팟수_순위순이다() { // recommended_courses.txt 확정본 그대로
+  /** recommended_courses.txt 확정본 23개 + 배 구간을 쓰는 3-11(V36). */
+  @Test void 추천코스는_24개이고_코드가_스팟수_순위순이다() {
     var codes = jdbc.queryForList("""
         SELECT course_code FROM courses
         WHERE course_code IS NOT NULL ORDER BY spot_count, rank_no""", String.class);
     assertEquals(List.of(
-        "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10",
+        "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10", "3-11",
         "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10",
         "5-01", "5-02", "5-03"), codes);
   }
@@ -53,15 +54,21 @@ class CourseDataTest {
    * 스팟 수별 개수 — 3·4곳은 순위 상위 10개, 5곳은 가능한 3개 전부(섬 코스 제외 후).
    * 배 시간표를 받아 섬 코스를 넣으면 이 테스트가 깨져서 알려준다.
    */
-  @Test void 스팟수별_코스는_3곳10_4곳10_5곳3이다() {
-    for (int[] e : new int[][] {{3, 10}, {4, 10}, {5, 3}}) {
+  @Test void 스팟수별_코스는_3곳11_4곳10_5곳3이다() {
+    for (int[] e : new int[][] {{3, 11}, {4, 10}, {5, 3}}) {
       assertEquals(e[1], jdbc.queryForObject("""
           SELECT count(*) FROM courses WHERE course_code IS NOT NULL AND spot_count = ?""",
           Integer.class, e[0]), e[0] + "곳 코스 수");
     }
   }
 
-  /** 구간 체인이 끊기면 화면이 타임라인을 그릴 수 없다. 스팟 N곳이면 구간은 N+1개다. */
+  /**
+   * 구간 체인이 끊기면 화면이 타임라인을 그릴 수 없다. 스팟 N곳이면 구간은 N+1개다.
+   *
+   * ⚠️ **배가 든 코스는 예외다.** 배는 떠난 선착장으로 **돌아오므로**(외도 왕복) 가는 구간과
+   * 돌아오는 구간 둘이 되어 왕복 한 번마다 구간이 하나 더 는다 — 3-11 은 스팟 3곳에 구간 5개다.
+   * 그래도 체인 자체는 이어진다(도장포 → 외도 → 도장포).
+   */
   @Test void 모든_코스의_구간체인이_끊기지_않는다() {
     for (var c : rows("""
         SELECT course_id, course_code, spot_count FROM courses
@@ -73,9 +80,12 @@ class CourseDataTest {
       assertEquals(spots, jdbc.queryForObject(
           "SELECT count(*) FROM course_pois WHERE course_id = ?", Integer.class, id),
           code + ": 스팟 수가 spot_count와 다르다");
-      assertEquals(spots + 1, jdbc.queryForObject(
+      int ferryRoundTrips = jdbc.queryForObject(
+          "SELECT count(*) / 2 FROM course_legs WHERE course_id = ? AND mode = 'FERRY'",
+          Integer.class, id);
+      assertEquals(spots + 1 + ferryRoundTrips, jdbc.queryForObject(
           "SELECT count(*) FROM course_legs WHERE course_id = ?", Integer.class, id),
-          code + ": 구간이 스팟 수 + 1이 아니다 — 체인이 끊겼다");
+          code + ": 구간이 스팟 수 + 1(+ 배 왕복 수)이 아니다 — 체인이 끊겼다");
 
       // 고현터미널(NULL)에서 시작해 고현터미널로 끝난다
       assertNull(jdbc.queryForObject(
@@ -130,7 +140,8 @@ class CourseDataTest {
           AND (r.board_estimated OR r.alight_estimated)
         ORDER BY c.spot_count, c.rank_no, l.leg_seq""");
 
-    assertEquals(35, est.size(), "추정이 붙은 승차 수(recommended_courses.json 과 같다)");
+    // 35(recommended_courses.json) + 2(3-11 의 도장포 하차·승차 — V36)
+    assertEquals(37, est.size(), "추정이 붙은 승차 수");
     var noTimeCell = java.util.Set.of("도장포", "대금교차로", "맹종죽테마파크");
     for (var r : rows("""
         SELECT c.course_code, r.board_stop, r.board_estimated, r.alight_stop, r.alight_estimated
@@ -146,8 +157,15 @@ class CourseDataTest {
         "양끝이 다 추정인 승차는 4-08 맹종죽테마파크 → 대금교차로 하나다");
   }
 
-  /** 같은 정류장 구간은 조선해양문화관 → 씨월드(둘 다 '신촌')뿐이다. 버스를 타지 않는다. */
-  @Test void 같은정류장_구간은_조선해양문화관에서_씨월드뿐이다() {
+  /**
+   * 같은 정류장 구간은 두 쌍뿐이다 — 조선해양문화관 → 씨월드(둘 다 '신촌', 8개 코스)와
+   * 도장포유람선 → 바람의언덕(둘 다 '도장포', 3-11 하나. 원문 「도보 1분거리에 바람의 언덕이 있습니다」).
+   * 버스를 타지 않는다.
+   *
+   * ⚠️ 3-11 의 것만 **시각이 없다**. 앞이 배 구간인데 배가 몇 시에 돌아오는지는 날짜마다 달라
+   * 역산할 수 없다 — 자리값을 지어 넣지 않는다(V36 이 chk_leg_same_stop 을 그렇게 풀었다).
+   */
+  @Test void 같은정류장_구간은_두_쌍뿐이다() {
     var same = rows("""
         SELECT c.course_code, pf.poi_name AS frm, pt.poi_name AS dst,
                l.duration_min, l.depart_time, l.arrive_time,
@@ -158,13 +176,16 @@ class CourseDataTest {
         JOIN pois pt ON pt.poi_id = l.to_poi_id
         WHERE c.course_code IS NOT NULL AND l.mode = 'SAME_STOP'""");
 
-    assertEquals(8, same.size(), "조선해양문화관 → 씨월드를 잇는 코스 8개다");
+    assertEquals(9, same.size(), "조선해양문화관 → 씨월드 8개 + 도장포유람선 → 바람의언덕 1개");
+    assertEquals(8, same.stream().filter(x -> "거제조선해양문화관".equals(x.get("frm"))).count());
     for (var s : same) {
-      assertEquals("거제조선해양문화관", s.get("frm"));
-      assertEquals("거제씨월드", s.get("dst"));
+      assertTrue(("거제조선해양문화관".equals(s.get("frm")) && "거제씨월드".equals(s.get("dst")))
+          || ("도장포유람선".equals(s.get("frm")) && "바람의언덕".equals(s.get("dst"))),
+          "같은 정류장 쌍이 아니다: " + s);
       assertEquals(0, ((Number) s.get("duration_min")).intValue());
       assertEquals(0L, ((Number) s.get("rides")).longValue(), "버스를 타지 않는다");
-      assertEquals(s.get("depart_time"), s.get("arrive_time"), "옮겨가는 시각 하나뿐이다");
+      assertEquals(s.get("depart_time"), s.get("arrive_time"),
+          "시각이 있으면 옮겨가는 시각 하나뿐이고, 배 뒤라면 둘 다 없다");
     }
   }
 
@@ -253,7 +274,8 @@ class CourseDataTest {
     var titled = rows("""
         SELECT course_code, title, intro FROM courses
         WHERE title IS NOT NULL OR intro IS NOT NULL ORDER BY course_code""");
-    assertEquals(List.of("3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "4-02", "4-03", "4-09", "4-10", "5-01"),
+    assertEquals(List.of("3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-11",
+            "4-02", "4-03", "4-09", "4-10", "5-01"),
         titled.stream().map(r -> (String) r.get("course_code")).toList());
     for (var r : titled) {
       String title = (String) r.get("title");
@@ -265,12 +287,22 @@ class CourseDataTest {
     }
   }
 
-  /** 스팟의 체류 시각이 앞뒤 구간과 이어지는지 — 도착 ≤ 출발이고 체류 분이 그 차이다. */
+  /**
+   * 스팟의 체류 시각이 앞뒤 구간과 이어지는지 — 도착 ≤ 출발이고 체류 분이 그 차이다.
+   *
+   * ⚠️ **배가 닿는 스팟은 시각이 없다**(3-11). 배는 날짜마다 출항이 달라 도착·출발을 역산할 수 없고,
+   * 자리값을 지어 넣지 않는다. 시각이 둘 다 있는 스팟만 검사한다 — 한쪽만 있으면 그건 오류라 잡는다.
+   */
   @Test void 스팟_체류시각이_앞뒤_구간과_이어진다() {
     for (var s : rows("""
         SELECT c.course_code, cp.poi_seq, cp.arrive_time, cp.leave_time, cp.stay_min
         FROM course_pois cp JOIN courses c ON c.course_id = cp.course_id
         WHERE c.course_code IS NOT NULL ORDER BY c.course_id, cp.poi_seq""")) {
+      if (s.get("arrive_time") == null || s.get("leave_time") == null) {
+        assertNull(s.get("stay_min"),
+            s.get("course_code") + " #" + s.get("poi_seq") + ": 시각이 없는데 체류 분이 있다");
+        continue;
+      }
       var arr = java.time.LocalTime.parse(s.get("arrive_time").toString());
       var lea = java.time.LocalTime.parse(s.get("leave_time").toString());
       int stay = ((Number) s.get("stay_min")).intValue();

@@ -29,8 +29,8 @@ class CourseApiTest {
   @Test void 코스목록_칩별_개수를_내려준다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(23))
-        .andExpect(jsonPath("$.counts['3']").value(10))
+        .andExpect(jsonPath("$.courses.length()").value(24))  // V36 이 배 코스 3-11 을 더했다
+        .andExpect(jsonPath("$.counts['3']").value(11))  // 3-11 포함
         .andExpect(jsonPath("$.counts['4']").value(10))
         .andExpect(jsonPath("$.counts['5']").value(3));
   }
@@ -79,7 +79,7 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courses.length()").value(10))
         .andExpect(jsonPath("$.courses[0].courseCode").value("4-01"))
         .andExpect(jsonPath("$.courses[9].courseCode").value("4-10"))
-        .andExpect(jsonPath("$.counts['3']").value(10));
+        .andExpect(jsonPath("$.counts['3']").value(11));
   }
 
   // ── 목록: 대표 코스 카드 v3 (Figma 582:416 · 585:417 · 585:485, 2026-09-14) ──────
@@ -98,13 +98,13 @@ class CourseApiTest {
             .value(org.hamcrest.Matchers.contains(
                 "3-01", "3-06", "3-02", "4-09", "3-04", "3-03", "5-01", "3-05", "4-02", "4-03")))
         // 칩은 없어졌지만 counts 는 그대로 준다 — 지도 화면 등 다른 호출과 응답 모양이 같아야 한다
-        .andExpect(jsonPath("$.counts['3']").value(10));
+        .andExpect(jsonPath("$.counts['3']").value(11));
   }
 
   /** featured 없이 부르면 전과 같다 — 23개 전량(코스 지도 화면이 쓴다). */
   @Test void featured_없이_부르면_23개_그대로다() throws Exception {
     mvc.perform(get("/api/courses"))
-        .andExpect(jsonPath("$.courses.length()").value(23))
+        .andExpect(jsonPath("$.courses.length()").value(24))  // V36 이 배 코스 3-11 을 더했다
         // 새 필드는 대표 코스가 아니어도 채운다 — 카드 한 장이 어느 목록에서 왔든 같은 모양이다
         .andExpect(jsonPath("$.courses[22].busRoutes").isArray())
         .andExpect(jsonPath("$.courses[22].nineScenicNos").isArray());
@@ -147,12 +147,15 @@ class CourseApiTest {
    * 휴일 운행은 노선이 아니라 **회차**로 본다 — 코스의 모든 승차가 휴일 시간표에 같은 시각으로 있어야 참이다.
    * 운영 기대값(브리프 courses.json): 55·55-1·67-1·33·61 만 타는 여섯 코스가 참이고, 10·11·22·22-1·60·32·32-1
    * 이 섞인 나머지는 거짓이다(10·20번대는 평일/휴일 분리 — §2 요일 구조).
+   * 3-11(배 코스, V36)도 참이다 — 55번 한 노선이고 55번은 평일·휴일 시각이 같다.
+   * ⚠️ 배는 여기서 안 본다. holidayService 는 **승차(course_rides)**로만 판정하는데 배는 승차가 없다.
+   * 유람선은 요일이 아니라 날짜마다 운항이 다르므로(부록 G) 그 판단은 화면의 배 시간표가 한다.
    */
-  @Test void 휴일에도_타는_코스는_여섯이다() throws Exception {
+  @Test void 휴일에도_타는_코스는_일곱이다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(jsonPath("$.courses[?(@.holidayService == true)].courseCode")
             .value(org.hamcrest.Matchers.containsInAnyOrder(
-                "3-01", "3-04", "3-05", "3-06", "4-01", "4-03")));
+                "3-01", "3-04", "3-05", "3-06", "4-01", "4-03", "3-11")));
   }
 
   /**
@@ -177,6 +180,7 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courses[*].courseCode")
             .value(org.hamcrest.Matchers.contains(
                 "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10",
+                "3-11",
                 "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10",
                 "5-01", "5-02", "5-03")))
         .andExpect(jsonPath("$.courses[*].courseId")
@@ -360,5 +364,113 @@ class CourseApiTest {
 
   @Test void 코스상세_없는_코스는_404() throws Exception {
     mvc.perform(get("/api/courses/9999")).andExpect(status().isNotFound());
+  }
+
+  // ── 배 구간 (V35) ────────────────────────────────────────────────────────
+  //
+  // 외도보타니아는 거제 9경 3경인데 **배로만 간다**. 시간표(V23·V24, 1,081편)는 진작 있었는데
+  // course_legs.mode 가 BUS·SAME_STOP 뿐이라 코스에 담을 자리가 없었다.
+  // 배는 버스와 두 가지가 다르다 — ① 떠난 선착장으로 **돌아온다** ② 시각이 **날짜마다 다르다**.
+
+  /** 배 코스가 목록에 선다. 스팟 셋(바람의언덕 · 도장포유람선 · 외도보타니아) 중 9경이 둘이다. */
+  @Test void 코스목록에_배_코스가_있다() throws Exception {
+    mvc.perform(get("/api/courses"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].spotCount").value(3))
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].nineScenicCount").value(2));
+  }
+
+  /**
+   * 배는 **왕복 한 덩어리**라 구간이 둘이다 — 가는 구간(외도까지)과 돌아오는 구간(선착장으로).
+   * 원문이 주는 것은 왕복 + 외도 체류를 합친 총 소요시간(약 2시간 40분) 하나뿐이라
+   * 그 값을 **가는 구간에 싣고 돌아오는 구간은 0분**이다. 한 방향 시간을 우리가 쪼개 만들지 않는다.
+   */
+  @Test void 코스상세_배_구간은_가는_구간과_돌아오는_구간_둘이다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.legs.length()").value(5))
+        .andExpect(jsonPath("$.legs[1].mode").value("FERRY"))
+        .andExpect(jsonPath("$.legs[1].fromName").value("도장포유람선"))
+        .andExpect(jsonPath("$.legs[1].toName").value("외도보타니아"))
+        .andExpect(jsonPath("$.legs[1].durationMin").value(160))
+        .andExpect(jsonPath("$.legs[2].mode").value("FERRY"))
+        .andExpect(jsonPath("$.legs[2].fromName").value("외도보타니아"))
+        .andExpect(jsonPath("$.legs[2].toName").value("도장포유람선"))
+        .andExpect(jsonPath("$.legs[2].durationMin").value(0));
+  }
+
+  /**
+   * 화면이 「외도상륙 유람선 · 약 2시간 40분」 + 「외도에 2시간 머물러요 · 입장료 별도」를 그리려면
+   * 이 넷이 필요하다. 코스 이름은 **원문 그대로**여야 한다 — 「외도입장료 별도」가 거기 있다.
+   */
+  @Test void 코스상세_배_구간에_유람선_정보가_실린다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.legs[1].ferry.legendLabel").value("외도상륙+해금강선상관광"))
+        .andExpect(jsonPath("$.legs[1].ferry.courseName")
+            .value(org.hamcrest.Matchers.containsString("외도입장료 별도")))
+        .andExpect(jsonPath("$.legs[1].ferry.totalText").value("약 2시간 40분"))
+        .andExpect(jsonPath("$.legs[1].ferry.stayMin").value(120))
+        .andExpect(jsonPath("$.legs[1].ferry.dockName").value("도장포"))
+        .andExpect(jsonPath("$.legs[1].ferry.landsOnOedo").value(true))
+        .andExpect(jsonPath("$.legs[1].ferry.bookingUrl")
+            .value(org.hamcrest.Matchers.startsWith("https://")));
+  }
+
+  /** 돌아오는 구간에도 같은 배 정보가 실린다 — 화면이 「도장포 선착장으로 돌아와요」를 그린다. */
+  @Test void 코스상세_돌아오는_배_구간에도_선착장이_실린다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.legs[2].ferry.dockName").value("도장포"))
+        .andExpect(jsonPath("$.legs[2].ferry.totalText").value("약 2시간 40분"));
+  }
+
+  /**
+   * ★ 배 분을 버스로 세면 카드의 「버스 약 N분」이 거짓말이 된다.
+   * 버스 102분(50 + 52) 과 배 160분을 갈라 센다. 같은 정류장 구간은 0분이라 양쪽 다 영향이 없다.
+   */
+  @Test void 코스상세_버스_시간과_배_시간을_갈라_센다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.busMinTotal").value(102))
+        .andExpect(jsonPath("$.busTotalText").value("약 1시간 42분"))
+        .andExpect(jsonPath("$.ferryMinTotal").value(160))
+        .andExpect(jsonPath("$.ferryTotalText").value("약 2시간 40분"));
+  }
+
+  /** 코스 목록 카드도 같이 갈라 받는다 — 카드에 두 값을 나란히 적는다. */
+  @Test void 코스목록_카드도_배_시간을_따로_받는다() throws Exception {
+    mvc.perform(get("/api/courses"))
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].busMinTotal").value(102))
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].ferryMinTotal").value(160));
+  }
+
+  /**
+   * 배 시각은 **날짜마다 다르다**(도장포 외도상륙 편은 10:30 이 38일 · 14:00 이 36일이고 나머지는 제각각).
+   * 그래서 구간에 시각을 박지 않는다 — 박으면 그 날짜에만 맞는 말이 된다.
+   * 버스 구간은 지금처럼 회차를 골라 박는다(48일 전부 12시 이후 편이 있어 오후 배를 늘 탈 수 있다).
+   */
+  @Test void 코스상세_배_구간에는_시각을_박지_않는다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.legs[1].departAt").doesNotExist())
+        .andExpect(jsonPath("$.legs[1].arriveAt").doesNotExist())
+        .andExpect(jsonPath("$.legs[0].departAt").value("11:05"))
+        .andExpect(jsonPath("$.departAt").value("11:05"))
+        .andExpect(jsonPath("$.returnAt").value("19:40"));
+  }
+
+  /** 버스 구간에는 배 정보가 없다 — 없는 칸을 만들지 않는다. */
+  @Test void 코스상세_버스_구간에는_배_정보가_없다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.legs[0].mode").value("BUS"))
+        .andExpect(jsonPath("$.legs[0].ferry").doesNotExist())
+        .andExpect(jsonPath("$.legs[3].mode").value("SAME_STOP"))
+        .andExpect(jsonPath("$.legs[3].ferry").doesNotExist())
+        .andExpect(jsonPath("$.legs[4].mode").value("BUS"))
+        .andExpect(jsonPath("$.legs[4].ferry").doesNotExist());
+  }
+
+  /** 배가 없는 코스는 배 시간이 0이고, 화면은 그 칩을 안 그린다. */
+  @Test void 코스상세_배가_없는_코스는_배_시간이_0이다() throws Exception {
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.ferryMinTotal").value(0))
+        .andExpect(jsonPath("$.ferryTotalText").doesNotExist());
   }
 }

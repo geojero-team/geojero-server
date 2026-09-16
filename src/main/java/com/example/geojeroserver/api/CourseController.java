@@ -96,6 +96,7 @@ public class CourseController {
       TripsPerDay tripsPerDay, boolean holidayService,
       String departAt, String returnAt, int approxTotalMin, String approxTotalText,
       int busMinTotal, String busTotalText,
+      int ferryMinTotal, String ferryTotalText,
       List<SpotBrief> spots) {}
 
   public record CoursesRes(Map<String, Integer> counts, List<CourseCard> courses) {}
@@ -136,16 +137,36 @@ public class CourseController {
    * {@code board} 는 출발 쪽이 스팟일 때만 있다 — 고현터미널에서 떠나는 첫 구간은 null 이다(터미널이 곧 정류장이라 0m 다).
    * 화면은 한 줄만 그린다: 내리는 곳이 있으면 그것, 없으면(마지막 구간) 타는 곳 — 그 구간과 스팟의 관계를 말한다.
    */
+  /**
+   * 이 구간이 타는 유람선 편(V35·V36). {@code mode == "FERRY"} 일 때만 있다.
+   *
+   * 값은 전부 {@code ferry_courses} 원문이다 — 우리가 계산한 것이 하나도 없다.
+   *   courseName   상품 원문 코스명. **「외도입장료 별도」가 여기 있다** — 화면 어딘가에 남아야 한다(부록 G)
+   *   legendLabel  짧은 이름(「외도상륙+해금강선상관광」). 구간 줄에 적는다
+   *   totalText    총 소요시간(「약 2시간 40분」). ⚠️ **왕복 + 외도 체류를 합친 값**이다 —
+   *                한 방향이 몇 분인지는 원문에 없어서 가는 구간에 싣고 돌아오는 구간은 0분이다
+   *   stayMin      외도에 내려 머무는 분(선상관광 편은 내리지 않아 null)
+   *   landsOnOedo  외도에 내리는가. false 면 배에서 보고 돌아온다
+   *   dockName     타는 선착장 짧은 이름(「도장포」)
+   *
+   * ⚠️ **출항 시각은 여기 없다.** 배는 날짜마다 시각이 달라(도장포 외도상륙 편은 48일 중 10:30 이 38일 ·
+   * 14:00 이 36일, 나머지는 제각각) 코스에 박지 않는다. 그날 배편은 스팟의 「시간표 ›」가 보여준다(부록 G).
+   */
+  public record FerryRide(String legendLabel, String courseName, String totalText,
+      Integer stayMin, boolean landsOnOedo, String dockName, String bookingUrl) {}
+
   public record Leg(int seq, String mode, Long fromPoiId, String fromName,
       Long toPoiId, String toName, String departAt, String arriveAt,
       int durationMin, int transfers, int transferWaitMin,
-      boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight) {}
+      boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight,
+      FerryRide ferry) {}
 
   public record CourseDetail(long courseId, String courseCode, String name, String summary,
       String title, String intro,
       String theme, Integer spotCount, Integer nineScenicCount,
       String departAt, String returnAt, Integer totalMin, Integer approxTotalMin,
       String approxTotalText, int busMinTotal, String busTotalText,
+      int ferryMinTotal, String ferryTotalText,
       int legCount, int estimatedLegCount,
       String service, String baseDate, String source,
       String originName, String originStop,
@@ -190,13 +211,17 @@ public class CourseController {
 
     // 구간 이동시간 합을 한 번에 받아 둔다 — 카드마다 물으면 코스 수만큼 쿼리가 늘어난다.
     var busMin = busMinByCourse();
+    var ferryMin = ferryMinByCourse();
 
     // 대표 코스 — 9경이 많고(nine_scenic_count DESC), 버스가 짧고(ASC), 스팟이 적고(ASC), 코드 순.
     // SQL 이 아니라 여기서 고르는 이유: 버스 시간 합이 course_legs 에서 오고 이미 받아 뒀다.
     if (Boolean.TRUE.equals(featured)) {
+      // 「이동이 짧은 코스 먼저」라는 뜻이라 **배도 이동으로 센다** — 버스만 세면 배 코스가
+      // 실제보다 짧아 보여 앞으로 온다(3-11 은 버스 102분이지만 배가 160분이다).
       rows.sort(Comparator
           .comparingLong((Map<String, Object> r) -> num(r.get("nine_scenic_count"))).reversed()
-          .thenComparingInt(r -> busMin.getOrDefault(num(r.get("course_id")), 0))
+          .thenComparingInt(r -> busMin.getOrDefault(num(r.get("course_id")), 0)
+              + ferryMin.getOrDefault(num(r.get("course_id")), 0))
           .thenComparingLong(r -> num(r.get("spot_count")))
           .thenComparing(r -> (String) r.get("course_code")));
       rows = new ArrayList<>(rows.subList(0, Math.min(FEATURED_LIMIT, rows.size())));
@@ -223,19 +248,35 @@ public class CourseController {
           tripsPerDay(routes, days), holidayService(courseRides, days.holiday()),
           hm(c.get("depart_time")), hm(c.get("return_time")),
           approx, approxText(approx),
-          bus, approxText(bus), spotBriefs(id)));
+          bus, approxText(bus),
+          ferryMin.getOrDefault(id, 0),
+          ferryMin.getOrDefault(id, 0) == 0 ? null : approxText(ferryMin.get(id)),
+          spotBriefs(id)));
     }
     return new CoursesRes(counts, cards);
   }
 
-  /** course_id → 구간 이동시간 합(분). 구간이 없는 코스는 키가 없다. */
+  /**
+   * course_id → 구간 이동시간 합(분). 구간이 없는 코스는 키가 없다.
+   *
+   * ★ **배를 버스로 세지 않는다.** 카드가 적는 「버스 약 N분」은 버스에 앉아 있는 분이고,
+   * 배 160분을 거기 더하면 거짓말이 된다. mode 로 갈라 센다(같은 정류장 구간은 0분이라 어느 쪽에도 안 는다).
+   */
   private Map<Long, Integer> busMinByCourse() {
+    return legMinByMode("mode <> 'FERRY'");
+  }
+
+  /** course_id → 배 구간 시간 합(분). 배가 없는 코스는 키가 없다. */
+  private Map<Long, Integer> ferryMinByCourse() {
+    return legMinByMode("mode = 'FERRY'");
+  }
+
+  private Map<Long, Integer> legMinByMode(String where) {
     var out = new LinkedHashMap<Long, Integer>();
-    jdbc.query("""
-        SELECT course_id, COALESCE(sum(duration_min), 0) AS bus_min
-        FROM course_legs GROUP BY course_id""",
+    jdbc.query("SELECT course_id, COALESCE(sum(duration_min), 0) AS min_sum"
+        + " FROM course_legs WHERE " + where + " GROUP BY course_id",
         rs -> {
-          out.put(rs.getLong("course_id"), rs.getInt("bus_min"));
+          out.put(rs.getLong("course_id"), rs.getInt("min_sum"));
         });
     return out;
   }
@@ -410,10 +451,14 @@ public class CourseController {
         SELECT l.leg_id, l.leg_seq, l.mode, l.from_poi_id, l.to_poi_id,
                l.depart_time, l.arrive_time, l.duration_min, l.transfers, l.transfer_wait_min,
                COALESCE(pf.short_name, pf.poi_name) AS from_name,
-               COALESCE(pt.short_name, pt.poi_name) AS to_name
+               COALESCE(pt.short_name, pt.poi_name) AS to_name,
+               fc.legend_label, fc.course_name AS ferry_course_name, fc.total_text,
+               fc.oedo_stay_min, fc.lands_on_oedo, fc.booking_url, fd.short_name AS dock_name
         FROM course_legs l
         LEFT JOIN pois pf ON pf.poi_id = l.from_poi_id
         LEFT JOIN pois pt ON pt.poi_id = l.to_poi_id
+        LEFT JOIN ferry_courses fc ON fc.course_id = l.ferry_course_id
+        LEFT JOIN ferry_docks   fd ON fd.dock_id   = fc.dock_id
         WHERE l.course_id = ? ORDER BY l.leg_seq""", courseId)) {
       long legId = num(l.get("leg_id"));
       var rides = jdbc.query("""
@@ -434,6 +479,13 @@ public class CourseController {
       // 내리는 곳은 가는 곳이 스팟일 때만, 타는 곳은 출발 쪽이 스팟일 때만 — 고현터미널은 그 자체가 정류장이라 0m 다.
       StopWalk alight = pair == null || l.get("to_poi_id") == null ? null : pair.alight();
       StopWalk board = pair == null || l.get("from_poi_id") == null ? null : pair.board();
+      // 배 구간에만 배편이 붙는다(V36 의 chk_leg_ferry_course 가 그것을 지킨다).
+      // 값은 ferry_courses 원문 그대로다 — 여기서 계산하는 것이 하나도 없다.
+      FerryRide ferry = l.get("legend_label") == null ? null
+          : new FerryRide((String) l.get("legend_label"), (String) l.get("ferry_course_name"),
+              (String) l.get("total_text"), (Integer) l.get("oedo_stay_min"),
+              Boolean.TRUE.equals(l.get("lands_on_oedo")), (String) l.get("dock_name"),
+              (String) l.get("booking_url"));
       legs.add(new Leg(
           (int) num(l.get("leg_seq")), (String) l.get("mode"),
           l.get("from_poi_id") == null ? null : num(l.get("from_poi_id")),
@@ -442,12 +494,14 @@ public class CourseController {
           l.get("to_poi_id") == null ? ORIGIN_NAME : (String) l.get("to_name"),
           hm(l.get("depart_time")), hm(l.get("arrive_time")),
           (int) num(l.get("duration_min")), (int) num(l.get("transfers")),
-          (int) num(l.get("transfer_wait_min")), est, rides, board, alight));
+          (int) num(l.get("transfer_wait_min")), est, rides, board, alight, ferry));
     }
 
     Integer approx = (Integer) c.get("approx_total_min");
     // 구간 이동시간 합. 이미 만든 legs 를 더하므로 쿼리를 더 쏘지 않는다.
-    int busMin = legs.stream().mapToInt(Leg::durationMin).sum();
+    // ★ 배를 버스로 세지 않는다 — 카드의 「버스 약 N분」은 버스에 앉아 있는 분이다.
+    int busMin = legs.stream().filter(x -> !"FERRY".equals(x.mode())).mapToInt(Leg::durationMin).sum();
+    int ferryMin = legs.stream().filter(x -> "FERRY".equals(x.mode())).mapToInt(Leg::durationMin).sum();
     return new CourseDetail(courseId, (String) c.get("course_code"),
         (String) c.get("course_name"), (String) c.get("summary"),
         (String) c.get("title"), (String) c.get("intro"), (String) c.get("theme"),
@@ -456,6 +510,7 @@ public class CourseController {
         (Integer) c.get("total_min"), approx,
         approx == null ? null : approxText(approx),
         busMin, approxText(busMin),
+        ferryMin, ferryMin == 0 ? null : approxText(ferryMin),
         legs.size(), (int) legs.stream().filter(Leg::estimated).count(),
         (String) c.get("service"),
         c.get("base_date") == null ? null : c.get("base_date").toString(),
