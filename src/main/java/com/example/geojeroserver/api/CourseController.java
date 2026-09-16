@@ -117,24 +117,29 @@ public class CourseController {
       String alightStop, String alightAt, boolean alightEstimated) {}
 
   /**
-   * 이 구간에서 **내리는 정류장**과 거기서 가는 스팟까지의 직선거리(m).
+   * 정류장 하나와 거기서 스팟까지의 직선거리(m).
    *
-   * 버스가 내려주는 곳은 스팟이 아니라 정류장이다 — 화면이 「55번 · 10분」만 적으면 「10분 뒤 스팟 도착」으로 읽힌다.
+   * 버스가 서는 곳은 스팟이 아니라 정류장이다 — 화면이 「55번 · 10분」만 적으면 「10분 뒤 스팟 도착」으로 읽힌다.
    * 해금강은 내리는 정류장에서 직선 1.1km 다(2026-09-16 사용자 결정 — 디자인브리프 부록 H).
-   * 값은 타는 곳 표(boarding_stops, V26·V29)에서 오고 {@code (from_poi_id, to_poi_id, route_no)} 로 찾는다 —
+   * 값은 타는 곳 표(boarding_stops, V26·V34)에서 오고 {@code (from_poi_id, to_poi_id, route_no)} 로 찾는다 —
    * 코스 구간의 키와 모양이 같다. 거리는 **직선**이고 걷는 거리가 아니다(걷는 거리·시간은 어느 원문에도 없다 — 절대규칙 1).
    */
-  public record Alight(String stop, Integer distanceM) {}
+  public record StopWalk(String stop, Integer distanceM) {}
+
+  /** 한 구간·노선의 타는 곳과 내리는 곳. 표의 한 줄에 둘 다 들어 있다. */
+  private record StopPair(StopWalk board, StopWalk alight) {}
 
   /**
    * 코스의 한 구간. {@code estimated} 는 "이 구간 시각 중 하나라도 추정인가"다 —
    * 화면이 배지 하나만 그리면 되게 서버가 접어서 준다. 근거는 rides 안에 남아 있다.
    * {@code alight} 는 가는 곳이 스팟일 때만 있다 — 고현터미널로 돌아가는 마지막 구간은 null 이다.
+   * {@code board} 는 출발 쪽이 스팟일 때만 있다 — 고현터미널에서 떠나는 첫 구간은 null 이다(터미널이 곧 정류장이라 0m 다).
+   * 화면은 한 줄만 그린다: 내리는 곳이 있으면 그것, 없으면(마지막 구간) 타는 곳 — 그 구간과 스팟의 관계를 말한다.
    */
   public record Leg(int seq, String mode, Long fromPoiId, String fromName,
       Long toPoiId, String toName, String departAt, String arriveAt,
       int durationMin, int transfers, int transferWaitMin,
-      boolean estimated, List<Ride> rides, Alight alight) {}
+      boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight) {}
 
   public record CourseDetail(long courseId, String courseCode, String name, String summary,
       String title, String intro,
@@ -344,7 +349,7 @@ public class CourseController {
     return ids.isEmpty() ? null : ids.get(0);
   }
 
-  private static String alightKey(Long fromPoi, Long toPoi, String routeNo) {
+  private static String stopKey(Long fromPoi, Long toPoi, String routeNo) {
     return fromPoi + ">" + toPoi + ">" + routeNo;
   }
 
@@ -352,21 +357,24 @@ public class CourseController {
    * 이 코스가 지나는 (출발, 가는 곳, 노선)마다 내리는 정류장. 구간마다 쿼리를 쏘지 않게 한 번에 받는다.
    * 표에 그 조합이 없으면 그냥 없다 — 가까운 정류장을 추측으로 고르지 않는다(절대규칙 1).
    */
-  private Map<String, Alight> alightsOf(long courseId, Long terminal) {
-    var out = new HashMap<String, Alight>();
+  private Map<String, StopPair> stopsOf(long courseId, Long terminal) {
+    var out = new HashMap<String, StopPair>();
     jdbc.query("""
-        SELECT b.from_poi_id, b.to_poi_id, b.route_no, b.alight_stop_name, b.alight_distance_m
+        SELECT b.from_poi_id, b.to_poi_id, b.route_no,
+               b.stop_name, b.distance_m, b.alight_stop_name, b.alight_distance_m
         FROM boarding_stops b
-        WHERE b.alight_stop_name IS NOT NULL
+        WHERE b.status = 'RESOLVED'
           AND EXISTS (SELECT 1 FROM course_legs l JOIN course_rides r ON r.leg_id = l.leg_id
                       WHERE l.course_id = ?
                         AND COALESCE(l.from_poi_id, ?) = b.from_poi_id
-                        AND l.to_poi_id = b.to_poi_id
+                        AND COALESCE(l.to_poi_id, ?) = b.to_poi_id
                         AND r.route_no = b.route_no)""",
         rs -> {
-          out.put(alightKey(rs.getLong("from_poi_id"), rs.getLong("to_poi_id"), rs.getString("route_no")),
-              new Alight(rs.getString("alight_stop_name"), (Integer) rs.getObject("alight_distance_m")));
-        }, courseId, terminal);
+          out.put(stopKey(rs.getLong("from_poi_id"), rs.getLong("to_poi_id"), rs.getString("route_no")),
+              new StopPair(
+                  new StopWalk(rs.getString("stop_name"), (Integer) rs.getObject("distance_m")),
+                  new StopWalk(rs.getString("alight_stop_name"), (Integer) rs.getObject("alight_distance_m"))));
+        }, courseId, terminal, terminal);
     return out;
   }
 
@@ -395,7 +403,7 @@ public class CourseController {
         courseId);
 
     Long terminal = terminalPoiId();
-    var alights = alightsOf(courseId, terminal);
+    var stopPairs = stopsOf(courseId, terminal);
 
     var legs = new ArrayList<Leg>();
     for (var l : jdbc.queryForList("""
@@ -418,11 +426,14 @@ public class CourseController {
               rs.getBoolean("alight_estimated")),
           legId);
       boolean est = rides.stream().anyMatch(r -> r.boardEstimated() || r.alightEstimated());
-      // 가는 곳이 스팟일 때만 — 고현터미널로 돌아가는 구간은 내려서 갈 곳이 없다(거리가 0이라 뜻이 없다).
       // 노선은 **마지막으로 탄 버스**다. 환승은 코스에 없지만(기준문서 §6) 있어도 내리는 것은 마지막 버스다.
-      Alight alight = l.get("to_poi_id") == null || rides.isEmpty() ? null
-          : alights.get(alightKey(l.get("from_poi_id") == null ? terminal : num(l.get("from_poi_id")),
-              num(l.get("to_poi_id")), rides.get(rides.size() - 1).routeNo()));
+      StopPair pair = rides.isEmpty() ? null
+          : stopPairs.get(stopKey(l.get("from_poi_id") == null ? terminal : num(l.get("from_poi_id")),
+              l.get("to_poi_id") == null ? terminal : num(l.get("to_poi_id")),
+              rides.get(rides.size() - 1).routeNo()));
+      // 내리는 곳은 가는 곳이 스팟일 때만, 타는 곳은 출발 쪽이 스팟일 때만 — 고현터미널은 그 자체가 정류장이라 0m 다.
+      StopWalk alight = pair == null || l.get("to_poi_id") == null ? null : pair.alight();
+      StopWalk board = pair == null || l.get("from_poi_id") == null ? null : pair.board();
       legs.add(new Leg(
           (int) num(l.get("leg_seq")), (String) l.get("mode"),
           l.get("from_poi_id") == null ? null : num(l.get("from_poi_id")),
@@ -431,7 +442,7 @@ public class CourseController {
           l.get("to_poi_id") == null ? ORIGIN_NAME : (String) l.get("to_name"),
           hm(l.get("depart_time")), hm(l.get("arrive_time")),
           (int) num(l.get("duration_min")), (int) num(l.get("transfers")),
-          (int) num(l.get("transfer_wait_min")), est, rides, alight));
+          (int) num(l.get("transfer_wait_min")), est, rides, board, alight));
     }
 
     Integer approx = (Integer) c.get("approx_total_min");

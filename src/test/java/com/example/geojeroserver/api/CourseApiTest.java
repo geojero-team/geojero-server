@@ -229,6 +229,34 @@ class CourseApiTest {
         .andExpect(jsonPath("$.legs[2].alight.distanceM").value(106));
   }
 
+  @Test void 코스상세_마지막_구간에는_돌아갈_때_타는_정류장이_있다() throws Exception {
+    // 마지막 구간은 고현터미널로 돌아가는 길이라 내릴 스팟이 없다. 대신 **어디서 타는지**를 말한다 —
+    // 없으면 마지막 스팟에서 버스를 어디서 기다릴지 화면이 한 글자도 말하지 않는다(2026-09-16 사용자 지적).
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.legs[3].toName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[3].alight").doesNotExist())
+        .andExpect(jsonPath("$.legs[3].board.stop").value("도장포"))
+        .andExpect(jsonPath("$.legs[3].board.distanceM").value(376));
+  }
+
+  @Test void 코스상세_돌아갈_때_타는_곳이_내린_곳과_다를_수_있다() throws Exception {
+    // 학동몽돌해변으로 끝나는 코스 셋(3-04 · 4-03 · 4-04)은 67-1 로 「학동삼거리」(106m)에 내리고
+    // 돌아갈 때는 55번을 「학동」(311m)에서 탄다 — 다른 정류장이고 3배 멀다.
+    mvc.perform(get("/api/courses/115"))
+        .andExpect(jsonPath("$.legs[3].alight.stop").value("학동삼거리"))
+        .andExpect(jsonPath("$.legs[4].toName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[4].board.stop").value("학동"))
+        .andExpect(jsonPath("$.legs[4].board.distanceM").value(311));
+  }
+
+  @Test void 코스상세_고현터미널에서_떠나는_첫_구간에는_타는_곳이_없다() throws Exception {
+    // 터미널이 곧 정류장이라 0m 다 — 「고현터미널에서 타요 · 직선 약 0m」는 말이 안 된다.
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.legs[0].fromName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[0].board").doesNotExist())
+        .andExpect(jsonPath("$.legs[0].alight.stop").value("학동"));
+  }
+
   @Test void 코스상세_씨월드는_시각은_지세포지만_내리는_곳은_신촌이다() throws Exception {
     // 「내리는 곳과 시간표를 읽는 곳이 다르다」는 규칙(부록 G 5-1 · 부록 J)을 코스 화면도 같은 말로 한다.
     mvc.perform(get("/api/courses/121"))
