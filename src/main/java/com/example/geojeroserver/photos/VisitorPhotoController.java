@@ -57,7 +57,7 @@ public class VisitorPhotoController {
     var photos = jdbc.query("""
         SELECT photo_id, user_id, caption, width, height,
                (created_at AT TIME ZONE 'Asia/Seoul')::date::text AS uploaded_date
-        FROM visitor_photos WHERE poi_id = ?
+        FROM visitor_photos WHERE poi_id = ? AND hidden_at IS NULL
         ORDER BY created_at DESC, photo_id DESC""",
         (rs, i) -> toPhoto(rs, uid), poiId);
     return new VisitorPhotosRes(poiId, photos.size(), photos);
@@ -129,10 +129,40 @@ public class VisitorPhotoController {
     return ResponseEntity.noContent().build();
   }
 
-  /** 비로그인. 저장된 재인코딩 JPEG 를 그대로 내려준다. 캐시 헤더는 기본값(no-store)이라 지운 사진이 바로 사라진다. */
+  /**
+   * 신고 — 부적절한 사진을 이용자가 그 자리에서 내릴 수 있는 수단(V33, 2026-09-16).
+   *
+   * 한 건이라도 들어오면 **그 자리에서 감춘다**(hidden_at). 지우지는 않는다 — 잘못된 신고를 되돌릴 수
+   * 있어야 하고, 남이 올린 사진을 다른 사람이 영구히 없앨 수 있으면 안 된다.
+   *
+   * 로그인한 사람만 신고한다(올리기와 같은 규칙). 누가 신고했는지 남으므로 장난 신고를 되짚을 수 있다.
+   * 같은 사람의 두 번째 신고도, 이미 감춰진 사진도 204 다 — 신고한 사람이 보는 결과가 같기 때문이다.
+   */
+  @PostMapping("/api/visitor-photos/{photoId}/report")
+  public ResponseEntity<Void> report(HttpServletRequest req, @PathVariable long photoId) {
+    long uid = requireExistingUser(req);
+    if (jdbc.queryForList("SELECT 1 FROM visitor_photos WHERE photo_id = ?",
+        Integer.class, photoId).isEmpty()) {
+      throw new BusinessException(ErrorCode.PHOTO_NOT_FOUND);
+    }
+    jdbc.update("""
+        INSERT INTO visitor_photo_reports (photo_id, user_id) VALUES (?, ?)
+        ON CONFLICT (photo_id, user_id) DO NOTHING""", photoId, uid);
+    jdbc.update("UPDATE visitor_photos SET hidden_at = now() WHERE photo_id = ? AND hidden_at IS NULL",
+        photoId);
+    return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * 비로그인. 저장된 재인코딩 JPEG 를 그대로 내려준다. 캐시 헤더는 기본값(no-store)이라 지운 사진이 바로 사라진다.
+   * 신고로 감춰진 사진(V33)은 여기서도 막는다 — 목록에서만 빼면 주소를 아는 사람에게는 계속 보인다.
+   */
   @GetMapping("/api/visitor-photos/{photoId}/image")
   public ResponseEntity<byte[]> image(@PathVariable long photoId) {
-    var jpeg = jdbc.query("SELECT jpeg FROM visitor_photo_blobs WHERE photo_id = ?",
+    var jpeg = jdbc.query("""
+        SELECT b.jpeg FROM visitor_photo_blobs b
+          JOIN visitor_photos p ON p.photo_id = b.photo_id
+        WHERE b.photo_id = ? AND p.hidden_at IS NULL""",
         (rs, i) -> rs.getBytes(1), photoId);
     if (jpeg.isEmpty()) {
       throw new BusinessException(ErrorCode.PHOTO_NOT_FOUND);

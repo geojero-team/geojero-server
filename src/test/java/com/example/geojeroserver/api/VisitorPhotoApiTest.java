@@ -110,6 +110,68 @@ class VisitorPhotoApiTest {
 
   // ── 목록: 비로그인 ───────────────────────────────────────────────────────
 
+  // ── 신고(V33) ─────────────────────────────────────────────────────────────
+
+  /**
+   * 신고 한 건이면 목록과 이미지 경로 **양쪽에서** 사라진다. 목록에서만 빼면 주소를 아는 사람에게는
+   * 계속 보인다. 행은 남긴다 — 잘못된 신고를 되돌릴 수 있어야 한다(hidden_at 을 NULL 로).
+   */
+  @Test void 신고하면_목록과_이미지에서_사라지고_행은_남는다() throws Exception {
+    long poi = spotPoi();
+    long photoId = jdbc.queryForObject("""
+        INSERT INTO visitor_photos (poi_id, user_id, caption, width, height, byte_size)
+        VALUES (?, ?, NULL, 1, 1, 1) RETURNING photo_id""", Long.class, poi, userId(OWNER));
+    jdbc.update("INSERT INTO visitor_photo_blobs (photo_id, jpeg) VALUES (?, ?)",
+        photoId, new byte[] {1});
+    mvc.perform(get("/api/pois/" + poi + "/visitor-photos"))
+        .andExpect(jsonPath("$.count").value(1));
+
+    mvc.perform(post("/api/visitor-photos/" + photoId + "/report")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token(OTHER)))
+        .andExpect(status().isNoContent());
+
+    mvc.perform(get("/api/pois/" + poi + "/visitor-photos"))
+        .andExpect(jsonPath("$.count").value(0));
+    mvc.perform(get("/api/visitor-photos/" + photoId + "/image"))
+        .andExpect(status().isNotFound());
+    assertEquals(1, count("visitor_photos", photoId));
+  }
+
+  /** 같은 사람이 두 번 눌러도 결과가 같다(204). 신고 기록은 한 줄이다 — (photo_id, user_id) 가 기본키다. */
+  @Test void 같은_사람이_두_번_신고해도_204이고_기록은_하나() throws Exception {
+    long photoId = jdbc.queryForObject("""
+        INSERT INTO visitor_photos (poi_id, user_id, width, height, byte_size)
+        VALUES (?, ?, 1, 1, 1) RETURNING photo_id""", Long.class, spotPoi(), userId(OWNER));
+    String token = token(OTHER);
+
+    for (int i = 0; i < 2; i++) {
+      mvc.perform(post("/api/visitor-photos/" + photoId + "/report")
+              .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+          .andExpect(status().isNoContent());
+    }
+    assertEquals(1, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photo_reports WHERE photo_id = ?", Integer.class, photoId));
+  }
+
+  /** 비로그인 신고는 401. 누가 신고했는지 남지 않으면 장난 신고를 되짚을 수 없다. */
+  @Test void 로그인_없이_신고는_401_없는_사진은_404() throws Exception {
+    long photoId = jdbc.queryForObject("""
+        INSERT INTO visitor_photos (poi_id, user_id, width, height, byte_size)
+        VALUES (?, ?, 1, 1, 1) RETURNING photo_id""", Long.class, spotPoi(), userId(OWNER));
+
+    mvc.perform(post("/api/visitor-photos/" + photoId + "/report"))
+        .andExpect(status().isUnauthorized());
+    mvc.perform(post("/api/visitor-photos/99999999/report")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token(OTHER)))
+        .andExpect(status().isNotFound());
+    // 401·404 는 아무것도 감추지 않는다
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photos WHERE photo_id = ? AND hidden_at IS NOT NULL",
+        Integer.class, photoId));
+  }
+
+  // ── 목록: 비로그인 ───────────────────────────────────────────────────────
+
   /** 처음엔 17곳 전부 0장이다. 0장은 404 가 아니라 정상 상태다 — 화면은 빈 상태를 그린다. */
   @Test void 사진이_없는_스팟은_200_0장() throws Exception {
     long poi = spotPoi();
