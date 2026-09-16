@@ -79,15 +79,29 @@ INSERT INTO course_pois (course_id, poi_id, poi_seq, is_fixed, arrive_time, leav
   (124, 5, 2, true, NULL,    NULL, NULL),   -- 외도보타니아 — 배 시각이 날짜마다 달라 시각 없음(체류 120분은 ferry_courses)
   (124, 1, 3, true, NULL,    '18:48', NULL); -- 바람의언덕 — 복귀 버스 시각만 확정
 
--- 구간 다섯. 3·4 가 배(왕복 한 덩어리)라 시각이 없다.
-INSERT INTO course_legs (course_id, leg_seq, from_poi_id, to_poi_id, mode,
-                         depart_time, arrive_time, duration_min, transfers, transfer_wait_min,
-                         ferry_course_id) VALUES
-  (124, 1, NULL, 2, 'BUS',       '11:05', '11:55',  50, 0, 0, NULL),
-  (124, 2, 2,    5, 'FERRY',      NULL,    NULL,   160, 0, 0, 9),
-  (124, 3, 5,    2, 'FERRY',      NULL,    NULL,     0, 0, 0, 9),
-  (124, 4, 2,    1, 'SAME_STOP',  NULL,    NULL,     0, 0, 0, NULL),
-  (124, 5, 1, NULL, 'BUS',       '18:48', '19:40',  52, 0, 0, NULL);
+-- 구간 다섯. 2·3 이 배(왕복 한 덩어리)라 시각이 없다.
+--
+-- ⚠️ 배편은 **id 를 박지 않고 이름으로 찾는다.** ferry_courses.course_id 는 serial 이라
+-- 적재 순서에 따라 DB 마다 다르다(로컬 9 · 운영 2 로 갈렸다). 스팟을 pois.short_name 으로 잇는 것과 같은 규칙이다.
+-- 도장포 선착장에서 외도에 **내리는** 편은 하나뿐이라 (dock_code, lands_on_oedo) 가 자연키가 된다.
+DO $$
+DECLARE oedo_from_dojangpo int;
+BEGIN
+  SELECT fc.course_id INTO oedo_from_dojangpo
+  FROM ferry_courses fc JOIN ferry_docks fd ON fd.dock_id = fc.dock_id
+  WHERE fd.dock_code = 'DOJANGPO' AND fc.lands_on_oedo;
+  IF oedo_from_dojangpo IS NULL THEN
+    RAISE EXCEPTION 'V36: 도장포 외도상륙 편을 찾지 못했다'; END IF;
+
+  INSERT INTO course_legs (course_id, leg_seq, from_poi_id, to_poi_id, mode,
+                           depart_time, arrive_time, duration_min, transfers, transfer_wait_min,
+                           ferry_course_id) VALUES
+    (124, 1, NULL, 2, 'BUS',       '11:05', '11:55',  50, 0, 0, NULL),
+    (124, 2, 2,    5, 'FERRY',      NULL,    NULL,   160, 0, 0, oedo_from_dojangpo),
+    (124, 3, 5,    2, 'FERRY',      NULL,    NULL,     0, 0, 0, oedo_from_dojangpo),
+    (124, 4, 2,    1, 'SAME_STOP',  NULL,    NULL,     0, 0, 0, NULL),
+    (124, 5, 1, NULL, 'BUS',       '18:48', '19:40',  52, 0, 0, NULL);
+END $$;
 
 -- 탄 버스. 도장포는 원문 격자에 칸이 없어 앞뒤 정류장으로 감싼 값이다(3-01 과 같은 규칙).
 INSERT INTO course_rides (leg_id, ride_seq, route_no, board_stop, board_time, board_estimated,
@@ -111,4 +125,10 @@ DO $$ BEGIN
     RAISE EXCEPTION 'V36: 3-11 승차가 2개가 아니다'; END IF;
   IF (SELECT sum(duration_min) FROM course_legs WHERE course_id = 124 AND mode = 'BUS') <> 102 THEN
     RAISE EXCEPTION 'V36: 3-11 버스 합이 102분이 아니다'; END IF;
+  -- 배 구간이 **도장포 외도상륙 편**을 가리키는지 — id 가 DB 마다 달라 이름으로 다시 확인한다
+  IF (SELECT count(*) FROM course_legs l
+      JOIN ferry_courses fc ON fc.course_id = l.ferry_course_id
+      JOIN ferry_docks fd ON fd.dock_id = fc.dock_id
+      WHERE l.course_id = 124 AND fd.dock_code = 'DOJANGPO' AND fc.lands_on_oedo) <> 2 THEN
+    RAISE EXCEPTION 'V36: 3-11 배 구간이 도장포 외도상륙 편이 아니다'; END IF;
 END $$;
