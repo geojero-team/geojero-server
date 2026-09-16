@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -92,5 +93,30 @@ public class AuthController {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("nickname", rows.get(0));
     return body;
+  }
+
+  /**
+   * 회원 탈퇴 — 이 서비스가 가진 그 사람의 데이터를 **전부** 지운다 (2026-09-16, 원스토어 등재 준비).
+   *
+   * users 한 행을 지우면 FK ON DELETE CASCADE 로 저장한 일정(saved_trips)과 방문자 사진
+   * (visitor_photos → visitor_photo_blobs)이 함께 사라진다. 지울 것이 users 밖에 없다는 뜻이라
+   * 여기서 표를 하나씩 지우지 않는다 — 표가 늘어도 이 코드는 그대로다(VisitorPhotoApiTest
+   * 「계정을_지우면_사진과_바이트가_함께_지워진다」가 그 규칙을 지킨다).
+   *
+   * 카카오 쪽 연결 끊기(unlink)는 하지 않는다 — 액세스 토큰을 보관하지 않기 때문이다(로그인
+   * 때 한 번 쓰고 버린다). 카카오 계정에서의 연결 해제는 카카오 설정에서 하도록 안내한다.
+   *
+   * 쿠키도 만료시킨다. 토큰(Bearer)은 서명이 7일 살아 있지만, 계정이 없으면 require 가 401 을
+   * 주므로 남은 토큰으로 할 수 있는 일이 없다.
+   */
+  @DeleteMapping("/api/me")
+  public ResponseEntity<Void> withdraw(HttpServletRequest req, HttpServletResponse res) {
+    long uid = sessions.require(req);
+    int n = jdbc.update("DELETE FROM users WHERE user_id = ?", uid);
+    if (n == 0) { // 세션은 유효하나 이미 지워진 계정 — /api/me 와 같은 답을 준다
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다");
+    }
+    res.addHeader(HttpHeaders.SET_COOKIE, sessions.clear().toString());
+    return ResponseEntity.noContent().build();
   }
 }

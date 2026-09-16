@@ -1,5 +1,6 @@
 package com.example.geojeroserver.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -67,6 +68,61 @@ class AuthTripsTest {
         .contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isUnauthorized());
     mvc.perform(delete("/api/saved-trips/1")).andExpect(status().isUnauthorized());
+    mvc.perform(delete("/api/me")).andExpect(status().isUnauthorized());
+  }
+
+  /**
+   * 회원 탈퇴 — 2026-09-16. 원스토어 등재에 계정 삭제 수단이 필요하고, 개인정보처리방침이
+   * 「탈퇴 시까지 보관」이라고 말하려면 실제로 지울 길이 있어야 한다.
+   *
+   * 여기서 지키는 것은 **users 한 행만 지우면 그 사람의 것이 전부 사라진다**는 규칙이다.
+   * 표가 늘어날 때 이 테스트가 먼저 깨지게 두려고, 저장 일정과 방문자 사진(바이트까지)을
+   * 만들어 두고 함께 사라지는지 본다.
+   */
+  @Test
+  void 탈퇴하면_계정과_저장한_코스_사진이_함께_지워진다() throws Exception {
+    final String oauthId = "test-oauth-withdraw";
+    when(kakao.exchange("withdraw-code", "http://localhost/cb"))
+        .thenReturn(new KakaoGateway.KakaoUser(oauthId, "탈퇴할유저"));
+    var login = mvc.perform(post("/api/auth/kakao").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"code\":\"withdraw-code\",\"redirectUri\":\"http://localhost/cb\"}"))
+        .andExpect(status().isOk())
+        .andReturn();
+    var cookie = login.getResponse().getCookie("gj_session");
+    assertNotNull(cookie);
+    long uid = jdbc.queryForObject(
+        "SELECT user_id FROM users WHERE provider = 'KAKAO' AND oauth_id = ?", Long.class, oauthId);
+
+    mvc.perform(post("/api/saved-trips").cookie(cookie).contentType(MediaType.APPLICATION_JSON)
+            .content("""
+                {"courseId":1,"travelDate":"2026-09-09",
+                 "arrivalTime":"08:20","returnTime":"21:10"}"""))
+        .andExpect(status().isCreated());
+    long poiId = jdbc.queryForObject(
+        "SELECT poi_id FROM pois WHERE theme IS NOT NULL ORDER BY poi_id LIMIT 1", Long.class);
+    long photoId = jdbc.queryForObject("""
+        INSERT INTO visitor_photos (poi_id, user_id, caption, width, height, byte_size)
+        VALUES (?, ?, NULL, 1, 1, 1) RETURNING photo_id""", Long.class, poiId, uid);
+    jdbc.update("INSERT INTO visitor_photo_blobs (photo_id, jpeg) VALUES (?, ?)",
+        photoId, new byte[] {1});
+
+    mvc.perform(delete("/api/me").cookie(cookie))
+        .andExpect(status().isNoContent())
+        // 쿠키도 그 자리에서 만료시킨다 — 브라우저에 로그인 흔적을 남기지 않는다
+        .andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")));
+
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM users WHERE user_id = ?", Integer.class, uid));
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM saved_trips WHERE user_id = ?", Integer.class, uid));
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photos WHERE photo_id = ?", Integer.class, photoId));
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM visitor_photo_blobs WHERE photo_id = ?", Integer.class, photoId));
+
+    // 남아 있는 세션으로는 아무것도 못 한다 — 계정이 없으면 401 이다
+    mvc.perform(get("/api/me").cookie(cookie)).andExpect(status().isUnauthorized());
+    mvc.perform(delete("/api/me").cookie(cookie)).andExpect(status().isUnauthorized());
   }
 
   @Test
