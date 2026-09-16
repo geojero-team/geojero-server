@@ -205,6 +205,46 @@ class CourseApiTest {
    * ★ 타임라인의 심장. 구간마다 노선 번호가 실려야 한다 —
    * 이게 없으면 거제시 공식 앱의 "25분 / 13.0km"와 같은 층위가 된다(기준문서 §5).
    */
+  @Test void 코스상세_구간마다_내리는_정류장과_직선거리가_있다() throws Exception {
+    // 버스가 내려주는 곳은 스팟이 아니라 정류장이다 — 「55번 · 10분」만 적으면 「10분 뒤 스팟 도착」으로 읽힌다.
+    // 해금강은 내리는 정류장에서 직선 1km 가 넘는다(2026-09-16 사용자 결정 — 디자인브리프 부록 H).
+    mvc.perform(get("/api/courses/101"))
+        // 271m 은 **내릴 때** 정류장에서 잰 값이다 — 타는 곳 카드의 311m(반대 방향 정류장)과 다르다.
+        .andExpect(jsonPath("$.legs[0].alight.stop").value("학동"))
+        .andExpect(jsonPath("$.legs[0].alight.distanceM").value(271))
+        .andExpect(jsonPath("$.legs[1].alight.stop").value("해금강종점"))
+        .andExpect(jsonPath("$.legs[1].alight.distanceM").value(1070))
+        .andExpect(jsonPath("$.legs[2].alight.stop").value("도장포"))
+        // 마지막 구간은 고현터미널로 돌아간다 — 내려서 갈 스팟이 없다
+        .andExpect(jsonPath("$.legs[3].toName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[3].alight").doesNotExist());
+  }
+
+  @Test void 코스상세_내리는_정류장은_그_구간의_노선을_따른다() throws Exception {
+    // 같은 스팟이라도 노선마다 서는 정류장이 다르다 — 학동몽돌해변은 55번이 「학동」(271m), 67-1번이 「학동삼거리」(106m).
+    mvc.perform(get("/api/courses/121"))
+        .andExpect(jsonPath("$.legs[2].rides[0].routeNo").value("67-1"))
+        .andExpect(jsonPath("$.legs[2].toName").value("학동몽돌해변"))
+        .andExpect(jsonPath("$.legs[2].alight.stop").value("학동삼거리"))
+        .andExpect(jsonPath("$.legs[2].alight.distanceM").value(106));
+  }
+
+  @Test void 코스상세_씨월드는_시각은_지세포지만_내리는_곳은_신촌이다() throws Exception {
+    // 「내리는 곳과 시간표를 읽는 곳이 다르다」는 규칙(부록 G 5-1 · 부록 J)을 코스 화면도 같은 말로 한다.
+    mvc.perform(get("/api/courses/121"))
+        .andExpect(jsonPath("$.legs[0].toName").value("조선해양문화관"))
+        .andExpect(jsonPath("$.legs[0].rides[0].alightStop").value("지세포"))
+        .andExpect(jsonPath("$.legs[0].alight.stop").value("신촌"))
+        .andExpect(jsonPath("$.legs[0].alight.distanceM").value(184));
+  }
+
+  @Test void 코스상세_같은정류장_구간에는_내리는_곳이_없다() throws Exception {
+    // 버스를 타지 않으므로 내리지도 않는다(조선해양문화관 → 거제씨월드).
+    mvc.perform(get("/api/courses/121"))
+        .andExpect(jsonPath("$.legs[1].mode").value("SAME_STOP"))
+        .andExpect(jsonPath("$.legs[1].alight").doesNotExist());
+  }
+
   @Test void 코스상세_구간마다_노선번호와_이동시간이_있다() throws Exception {
     mvc.perform(get("/api/courses/101"))
         .andExpect(jsonPath("$.legs.length()").value(4))
