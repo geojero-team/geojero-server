@@ -70,6 +70,9 @@ class ContractTest {
         // V28 — 거제시 공식 9경 번호. 앱이 주황 테두리·「거제9경이란?」 링크를 이 값으로 잇는다(poi_id 를 앱에 박지 않는다).
         // 2경 「바람의 언덕과 신선대」는 화면 스팟인 바람의언덕에만 붙는다. 9경이 아니면 null.
         .andExpect(jsonPath("$.pois[0].nineScenicNo").value(2))
+        // 목록에도 우리가 쓴 요약(V29 summary)이 실린다 — 스팟 탭의 「크게 보기」 카드가 쓴다(2026-09-17).
+        // 상세를 19번 부르지 않으려고 목록에 넣었다. 문장 자체는 데이터라 여기서 값을 박지 않는다.
+        .andExpect(jsonPath("$.pois[0].summary").isNotEmpty())
         .andExpect(jsonPath("$.pois[1].nineScenicNo").value(org.hamcrest.Matchers.nullValue()))
         .andExpect(jsonPath("$.pois[6].nineScenicNo").value(9))
         // 화면 이름(카드·핀 라벨). V7에서 "짧게"보다 "혼동 없게"로 옮겼다 —
