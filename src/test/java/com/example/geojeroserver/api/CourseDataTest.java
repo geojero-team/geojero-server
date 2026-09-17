@@ -434,6 +434,37 @@ class CourseDataTest {
   }
 
   /**
+   * ★ 대표 코스 소개는 짧게 줄여도 **코스의 스팟을 빠짐없이 방문 순서대로** 말한다(2026-09-17 밤 검토).
+   * 110자로 줄이면서 ② 6-01 이 「거제시 2일코스 가운데 여섯 곳」이라 적고 다섯 곳만 불렀다 — 조선해양문화관이 빠졌고
+   * 거제씨월드는 「지세포의 벨루가」로만 남았다. 카드 사진이 조선해양문화관인데 글에는 그 이름이 없었다.
+   * 스팟마다 소개에 나와야 할 말(이름이나 TourAPI 소개문의 다른 이름)을 두고, 앞 스팟이 나온 자리 뒤에서 다음 스팟을 찾는다.
+   * ⑤ 3-11 처럼 첫 문장이 외도를 먼저 말해도 도장포 → 외도 → 바람의언덕 차례가 뒤에서 이어지면 된다.
+   */
+  @Test void 대표코스_소개는_스팟을_빠짐없이_방문_순서대로_말한다() {
+    var mention = Map.ofEntries(
+        Map.entry("학동몽돌해변", "학동"), Map.entry("바람의언덕", "바람의 ?언덕"), Map.entry("해금강", "해금강"),
+        Map.entry("조선해양문화관", "조선해양문화관"), Map.entry("거제씨월드", "씨월드"), Map.entry("양지암조각공원", "양지암"),
+        Map.entry("옥포대첩기념공원", "옥포"), Map.entry("맹종죽테마공원", "맹종죽"), Map.entry("매미성", "매미성"),
+        Map.entry("거제식물원", "식물원|정글돔"), Map.entry("포로수용소", "포로수용소"), Map.entry("거제현 관아", "거제현 관아"),
+        Map.entry("도장포유람선", "도장포"), Map.entry("외도보타니아", "외도"));
+    for (var r : rows("""
+        SELECT c.course_code, c.intro, string_agg(p.short_name, '|' ORDER BY cp.poi_seq) AS spots
+        FROM courses c JOIN course_pois cp ON cp.course_id = c.course_id JOIN pois p ON p.poi_id = cp.poi_id
+        WHERE c.featured_rank IS NOT NULL
+        GROUP BY c.course_code, c.intro, c.featured_rank ORDER BY c.featured_rank""")) {
+      String intro = (String) r.get("intro");
+      int from = 0;
+      for (String spot : ((String) r.get("spots")).split("\\|")) {
+        String word = mention.get(spot);
+        assertNotNull(word, r.get("course_code") + ": 스팟 「" + spot + "」이 소개에 나올 말을 테스트에 정하지 않았다");
+        var m = java.util.regex.Pattern.compile(word).matcher(intro);
+        assertTrue(m.find(from), r.get("course_code") + ": 소개가 「" + spot + "」을 방문 순서 자리에서 말하지 않는다 — " + intro);
+        from = m.end();
+      }
+    }
+  }
+
+  /**
    * 대표 제목 열 개가 서로 비슷하게 시작하거나 끝나면 카드가 같아 보인다. 이미 겹친 것이 둘 있다 —
    * ③ ⑥ 이 「풍차 언덕…」으로 시작하고 ⑥ ⑦ 이 「…포로수용소 유적까지」로 끝난다. 8~10번을 넣으면서 **더 늘리지 않는다**.
    * 첫 어절 · 끝 어절(띄어쓰기로 자른 조각)로 본다.
