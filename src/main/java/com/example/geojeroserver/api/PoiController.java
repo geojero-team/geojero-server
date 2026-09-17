@@ -27,11 +27,11 @@ public class PoiController {
                             String theme, String region, String category, String tier,
                             boolean hasEnglish, Double lat, Double lng, String imageUrl,
                             String alightLabel, String timetableStop, boolean boardStopDiffers,
-                            List<String> ferryDocks, Integer nineScenicNo) {
+                            List<String> ferryDocks, Integer nineScenicNo, String summary) {
     PoiListItem withImageUrl(String url) {
       return new PoiListItem(poiId, name, shortName, kind, theme, region, category, tier,
           hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks,
-          nineScenicNo);
+          nineScenicNo, summary);
     }
   }
 
@@ -72,6 +72,8 @@ public class PoiController {
                         AND i.matched_by = 'HUMAN') AS has_en,
                p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text,
                p.photo_keyword, p.alight_label, p.timetable_stop, p.nine_scenic_no,
+               -- summary(V29, 우리가 쓴 요약)는 목록에도 내려준다 — 스팟 탭의 「크게 보기」가 카드에 쓴다(2026-09-17)
+               p.summary,
                -- 배를 타는 선착장: 외도 유람선(ferry_links DESTINATION, seq 순) 뒤에 도선(V31 shuttle_docks)
                (SELECT string_agg(x.name, '·' ORDER BY x.ord)
                   FROM (SELECT d.short_name AS name, d.seq AS ord
@@ -93,7 +95,7 @@ public class PoiController {
                   toDouble(rs.getBigDecimal("lng")), null,
                   alight, stop, SpotTimetableController.alightDiffers(stop, alight),
                   docks == null ? List.of() : List.of(docks.split("·")),
-                  rs.getObject("nine_scenic_no", Integer.class)),
+                  rs.getObject("nine_scenic_no", Integer.class), rs.getString("summary")),
               rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
               rs.getString("intro_text"), rs.getString("photo_keyword"));
         });
