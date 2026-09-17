@@ -1,0 +1,391 @@
+-- V37 (2026-09-17): 코스 재설계 2차 세트 — 대표 코스 일곱 · 성격 축 · 거제시 공식 코스 · 새 코스 여섯
+--
+-- 왜 — 코스 추천 카드 10장의 배지가 **전부 「거제 9경 · N경」**이라 코스마다 무엇이 다른지 화면이 말하지 않았다.
+-- 사용자가 코스를 **성격 축 셋**으로 다시 골랐다(geojero docs/코스재설계.md §5-1):
+--   OFFICIAL 거제시 공식 관광코스(tour.geoje.go.kr) · THEME 분류(pois.theme) · NINE 거제 9경(pois.nine_scenic_no).
+-- 여기서 ① 대표 목록 순서와 성격 축을 담을 칸 ② 거제시 공식 코스 표 ③ 새 코스 여섯(⑤ 는 V36 의 3-11 그대로)을 적재한다.
+-- 옛 대표 규칙(9경 많은 순 · 버스 짧은 순)은 버린다 — 이제 순서는 사람이 고른 featured_rank 다(CourseController).
+-- 옛 코스 24개는 지우지 않는다(저장 일정 saved_trips 가 가리킬 수 있고 지도 화면이 전량을 받는다).
+--
+-- ── 대표 일곱 ────────────────────────────────────────────────────────────────
+--   1 4-11 OFFICIAL 학동몽돌해변 → 바람의언덕 → 해금강 → (고현터미널) → 조선해양문화관
+--   2 6-01 OFFICIAL 학동몽돌해변 → 조선해양문화관 → 거제씨월드 → 양지암조각공원 → 옥포대첩기념공원 → 맹종죽테마공원
+--   3 3-12 THEME    바람의언덕 → 해금강 → (고현터미널) → 매미성
+--   4 3-13 THEME    거제식물원 → (고현터미널) → 매미성 → 맹종죽테마공원
+--   5 3-11 THEME    도장포유람선 → 외도보타니아 → 바람의언덕 (V36 — 구간은 그대로, 순서 · 축만 붙인다)
+--   6 4-12 NINE     바람의언덕 → 해금강 → 학동몽돌해변 → (고현터미널) → 포로수용소
+--   7 5-04 NINE     매미성 → 양지암조각공원 → 학동몽돌해변 → 거제현 관아 → (고현터미널) → 포로수용소
+--   코드는 기존 규칙 「{곳수}-{번호}」의 비어 있는 다음 번호다(rank_no = 번호). 여섯 곳 코스는 처음이다.
+--
+-- ── 거제시 공식 관광코스 (원문 HTML 로 직접 셌다) ───────────────────────────────
+--   원문: https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000 「추천여행코스 > 관광코스」 최종수정일 2026-05-16.
+--   네 코스가 한 페이지에 있다(코스마다 따로 주소가 없다). 전부 거제대교로 들어와 거가대교로 나간다 — 다리는 장소로 세지 않는다.
+--   · 당일코스 **여섯 곳**: 포로수용소유적공원 · 학동흑진주몽돌해변 · 바람의언덕/신선대 · 거제해금강/외도 · 거제조선해양문화관 ·
+--     거제맹종죽테마파크
+--   · 2일코스 **열여섯 곳**: 1일차 청마생가/기념관 · 포로수용소유적공원 · 학동흑진주몽돌해변 · 바람의언덕/신선대 · 거제해금강/외도 ·
+--     여차-홍포해변비경 · 명사해수욕장 / 2일차 거제자연휴양림 · 공곶이 · 거제조선해양문화관 · 거제씨월드 · 능포양지암조각공원 ·
+--     조선소 견학 · 옥포대첩기념공원 · 김영삼대통령전시관/생가 · 거제맹종죽테마파크.
+--     ⚠️ 「산방산비원」은 1일차 목록에 있지만 HTML 주석(<!-- -->) 안이라 화면에 나오지 않는다 — 세지 않는다(열일곱 아님).
+--   겹친 곳(matched)은 원문 한 칸을 한 곳으로 센다 — 「거제해금강/외도」 칸에 해금강만 들어도 한 곳이다.
+--   순서 유지(order_kept) — 원문 나열(2일코스는 1일차 → 2일차 이어서)에서 코스 스팟의 위치가 방문 순서대로 커지는가:
+--   · 4-11: 학동 2 → 바람의언덕 3 → 해금강 4 → 조선해양문화관 5 (당일코스 여섯 칸 중) — 커진다 → 참, 네 곳
+--   · 6-01: 학동 3 → 조선해양문화관 10 → 거제씨월드 11 → 양지암 12 → 옥포대첩 14 → 맹종죽 16 (열여섯 칸 중) — 커진다 → 참, 여섯 곳
+--
+-- ── 편 고르기 규칙 (2026-09-17 과제 지시) ─────────────────────────────────────
+--   근거는 **서버 자신의 시간표**다 — 스팟 계층(engine/SpotLayer)이 평일 2026-09-14 · 휴일 2026-09-19 에 내는 승차를
+--   스팟 쌍마다 전부 받아 코스마다 모든 조합을 돌렸다. 환승 없음(구간당 같은 노선 · 같은 방향 버스 한 편).
+--   1. 평일 · 휴일 시간표에 **둘 다 있는 편**(같은 노선 · 승차 · 하차 시각)을 먼저 찾는다 — 그래야 holidayService 가 참이다.
+--      사슬이 그런 편으로 안 이어지면 평일 편으로 싣는다(4-11 · 4-12 · 5-04 — 아래).
+--   2. 스팟마다 60분 이상 머문다 — 우리가 고른 값이다(원문에 체류 시간은 없다). 같은 정류장으로 걸어 옮기면 두 곳이라 120분.
+--   3. 되짚기(고현터미널 재통과)는 **직행이 없는 구간에만**, 코스당 한 번, 터미널에서 갈아탈 여유 10분 이상.
+--   4. 마지막 스팟 도착 18:30 이하 · 복귀 20:00 이하(스팟 운영시간은 [미확인]이다 — 코스재설계 §3).
+--   5. 초과 대기(필요한 간격을 넘겨 기다리는 분)의 합이 가장 적은 사슬, 07:00 전 출발은 피할 수 없을 때만.
+--      같으면 뒤에서 당긴 사슬(앞 구간이 「다음 편에 맞는 가장 늦은 편」) → 이른 아침 · 저녁 방문이 적은 사슬.
+--   6. 추정 시각(앞뒤 정류장으로 감싼 값)이 낀 이음은 필요한 간격에 10분을 더 둔다. 같은 노선 · 같은 구간인데 회차마다
+--      소요시간이 흔들리면(55번 해금강→고현 50~55분 · 50번 거제→고현 20~33분 등) 가장 늦게 닿는 값으로 읽어도 간격을 지킨다.
+--   결과 — 여섯 모두 이 규칙을 지키는 사슬 중 1위다(CourseDataTest 가 못박는다):
+--   · 4-11 평일 편: 둘 다 있는 편으로는 해금강 → 고현 → 지세포가 20:00 복귀 안에 안 이어진다(고현 → 지세포 둘 다 있는 편은 4000번 여섯뿐).
+--     고현 → 지세포 22번 16:08 이 평일에만 있다(20번대 평일/휴일 분리 — 기준문서 §2). 06:25 출발은 피할 수 없다 —
+--     학동 → 도장포 55번이 두 시간 간격이라 09:05 에 나서면 조선해양문화관 도착이 18:30 을 넘는다.
+--   · 6-01 둘 다 있는 편. 06:25 출발은 피할 수 없다 — 옥포대첩 → 맹종죽 32번(16:45)에 맞추려면 학동 → 지세포 67-1 09:00 이어야 한다.
+--   · 3-12 · 3-13 둘 다 있는 편, 09:05 · 09:35 출발.
+--     3-13 은 초과 대기가 같은 사슬이 셋(07:35 · 09:35 · 11:35 출발)이라 이른 아침 · 저녁 방문이 없는 09:35 를 골랐다.
+--   · 4-12 · 5-04 평일 편: 고현 ↔ 포로수용소 100 · 110 번대가 평일/휴일 분리라(§2) 둘 다 있는 편으로는 사슬이 안 이어진다.
+--   · 해금강 세 시간 머묾(4-11 · 3-12 · 4-12 의 11:55~14:48)은 55번 간격 탓이다 — 12:48 편은 해금강에 13:48 전에 닿아야 탄다.
+--   ⚠️ 3-13 의 50-2번 두 편은 원문 **격자 칸이 아니라 경로 문장**에서 나온 시각이다(스팟 계층 규칙 1). 고현발 09:35 는
+--      기준문서 §2 「50-2 거제식물원 7회 (고현발 07:35~19:35, 격 2시간)」와 맞는다. 나머지 편은 승차 · 하차(추정이면 감싼 앞뒤 칸)가 격자 칸이다.
+--
+-- ── 적재 모양 ────────────────────────────────────────────────────────────────
+--   · 되짚기는 구간 둘이다: 「A → 고현터미널」(to NULL) + 「고현터미널 → B」(from NULL). 구간마다 버스 한 대라 환승 없음 규칙이 그대로 선다.
+--   · ⚠️ **id 를 박지 않고 이름으로 찾는다**(V36 사고 — serial 은 DB 마다 다르다). 스팟은 pois.short_name, 거제시 코스는 official_code.
+--     course_id 125~130 은 V20 · V36 처럼 **직접 준 값**이라 DB 마다 같다(시퀀스를 쓰지 않는다). 끝에서 시퀀스를 max 로 맞춘다.
+--   · 추정 표시(board/alight_estimated)는 시각 칸이 없는 정류장(스팟 계층 VIRTUAL_STOPS: 도장포 · 식물원 · 대금교차로 · 포로수용소 ·
+--     옥포대첩기념공원 · 맹종죽테마파크)에만, 거기서는 반드시 붙는다 — CourseTimetableConsistencyTest 가 스팟 계층과 대조한다.
+--   · 같은 정류장 구간(조선해양문화관 → 거제씨월드, 지세포)은 앞 스팟 도착 + 60분에 옮긴다(V20 과 같은 규칙).
+--
+-- ── 제목 · 소개 ──────────────────────────────────────────────────────────────
+--   ⚠️ 사람이 쓸 자리를 **Claude 초안**으로 채웠다(V28 과 같은 처지 — 사용자가 고칠 수 있다).
+--   제목은 무엇을 보는가만(버스 이야기 · 「유일」 · 「가장」 · 원천에 없는 말 없이), 소개는 150자 이하.
+--   근거: TourAPI 소개문(2026-09-17 운영 /api/pois/{id} — 바람의언덕 「2009년 풍차」 · 해금강 「바다의 금강산 · 바위섬」 ·
+--   학동 「파도가 몽돌을 굴리며」 · 매미성 「태풍 매미 · 백순삼 씨 · 홀로 쌓은 성벽」 · 거제식물원 「유리로 덮인 · 거제정글돔 · 열대수목」 ·
+--   맹종죽 「굵은 대나무」 · 씨월드 「지세포 조선해양문화관 옆」 · 조선해양문화관 「배를 만들고 움직이는 원리를 체험」 ·
+--   포로수용소 「6·25 전쟁 · 포로수용소 부지 · 역사유적공원」 · 거제현 관아 「사적」) · 거제시 관광코스 원문 · 권역(pois.region) ·
+--   거제 9경 번호(V28). 미확인 수치는 넣지 않았다.
+
+-- 1) 거제시 공식 관광코스 --------------------------------------------------------
+CREATE TABLE official_courses (
+  official_code varchar(20) PRIMARY KEY,
+  name          varchar(30)  NOT NULL,
+  place_count   int          NOT NULL CHECK (place_count > 0),
+  source_url    varchar(300) NOT NULL,
+  source_modified date       NOT NULL
+);
+
+COMMENT ON TABLE official_courses IS
+  '거제시가 정한 관광코스(tour.geoje.go.kr 「추천여행코스 > 관광코스」). 코스 카드 배지 「거제시 당일코스 · 6곳 중 4곳」의 근거. '
+  'place_count 는 원문에 나오는 장소 칸 수다 — 거제대교 · 거가대교(다리)와 HTML 주석 안의 칸은 세지 않는다.';
+
+INSERT INTO official_courses (official_code, name, place_count, source_url, source_modified) VALUES
+  ('DAY',     '당일코스',  6, 'https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000', '2026-05-16'),
+  ('TWO_DAY', '2일코스',  16, 'https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000', '2026-05-16');
+
+-- 2) 대표 목록 순서 · 성격 축 · 거제시 코스 대조 ------------------------------------
+ALTER TABLE courses
+  ADD COLUMN featured_rank       int UNIQUE CHECK (featured_rank > 0),
+  ADD COLUMN badge_axis          text CHECK (badge_axis IN ('OFFICIAL', 'THEME', 'NINE')),
+  ADD COLUMN official_code       varchar(20) REFERENCES official_courses,
+  ADD COLUMN official_matched    int CHECK (official_matched > 0),
+  ADD COLUMN official_order_kept boolean;
+
+-- 대표 코스만 성격 축이 있고, 대표 코스는 반드시 성격 축이 있다.
+ALTER TABLE courses ADD CONSTRAINT chk_courses_featured_axis
+  CHECK ((featured_rank IS NULL) = (badge_axis IS NULL));
+-- OFFICIAL 이면 거제시 코스를 가리키고, 가리키면 OFFICIAL 이다. badge_axis 가 NULL 이어도 참 · 거짓으로 가른다.
+ALTER TABLE courses ADD CONSTRAINT chk_courses_official_axis
+  CHECK ((badge_axis IS NOT DISTINCT FROM 'OFFICIAL') = (official_code IS NOT NULL));
+-- 거제시 코스를 가리키면 겹친 곳 수와 순서 유지가 같이 있다.
+ALTER TABLE courses ADD CONSTRAINT chk_courses_official_fields
+  CHECK ((official_code IS NULL) = (official_matched IS NULL)
+     AND (official_code IS NULL) = (official_order_kept IS NULL));
+
+COMMENT ON COLUMN courses.featured_rank IS
+  '대표 코스 목록(GET /api/courses?featured=true) 순서. NULL 이면 대표가 아니다. 사람이 고른 순서다(코스재설계 §5-1, 2026-09-17).';
+COMMENT ON COLUMN courses.badge_axis IS
+  '이 코스를 어느 성격 축으로 골랐나 — 카드 첫 줄 배지. OFFICIAL 거제시 공식 코스 · THEME 분류(pois.theme) · NINE 거제 9경. '
+  '대표 코스만 값이 있다.';
+COMMENT ON COLUMN courses.official_matched IS
+  '거제시 코스 원문 칸 중 이 코스 스팟이 든 칸 수. 「거제해금강/외도」처럼 한 칸에 두 곳이면 한쪽만 들어도 한 칸이다.';
+COMMENT ON COLUMN courses.official_order_kept IS
+  '이 코스의 방문 순서가 거제시 코스 원문 나열 순서와 같은가(2일코스는 1일차 → 2일차를 이어 본다).';
+
+-- 3) 새 코스 여섯 -------------------------------------------------------------
+-- 스팟 이름이 pois 에 **정확히 하나씩** 있는지 먼저 본다. 아래 JOIN 이 이름을 못 찾으면 행이 조용히 빠지거나
+-- (LEFT JOIN) 고현터미널(NULL)로 읽힌다 — 그 전에 멈춘다.
+DO $$
+DECLARE missing text;
+BEGIN
+  SELECT string_agg(n, ', ') INTO missing
+  FROM unnest(ARRAY['학동몽돌해변', '바람의언덕', '해금강', '조선해양문화관', '거제씨월드', '양지암조각공원',
+                    '옥포대첩기념공원', '맹종죽테마공원', '매미성', '거제식물원', '포로수용소', '거제현 관아']) AS n
+  WHERE (SELECT count(*) FROM pois p WHERE p.short_name = n) <> 1;
+  IF missing IS NOT NULL THEN
+    RAISE EXCEPTION 'V37: 스팟 이름을 pois.short_name 에서 하나로 찾지 못했다 — %', missing; END IF;
+  IF EXISTS (SELECT 1 FROM courses WHERE course_id BETWEEN 125 AND 130
+             OR course_code IN ('3-12', '3-13', '4-11', '4-12', '5-04', '6-01')) THEN
+    RAISE EXCEPTION 'V37: course_id 125~130 또는 새 코드가 이미 있다'; END IF;
+END $$;
+
+INSERT INTO courses (course_id, course_name, summary, course_code, spot_count, rank_no, nine_scenic_count,
+                     depart_time, return_time, total_min, approx_total_min,
+                     service, base_date, origin_stop, source_file, title, intro)
+SELECT v.course_id, v.course_name, v.summary, v.course_code, v.spot_count, v.rank_no, 0,
+       v.depart_time::time, v.return_time::time, v.total_min, v.approx_total_min,
+       'WEEKDAY', '2026-08-18', '고현', '거제시 BIS 원문 · 스팟 계층 편 고르기(코스재설계 2차 세트, 2026-09-17)',
+       v.title, v.intro
+FROM (VALUES
+  (125, '학동몽돌해변 · 바람의언덕 · 해금강 · 조선해양문화관',
+        '고현터미널 06:25 출발 → 18:30 복귀 · 약 12시간', '4-11', 4, 11, '06:25', '18:30', 725, 720,
+        '거제시 당일코스의 네 곳, 몽돌해변부터 조선해양문화관까지',
+        '거제시가 당일코스로 묶은 여섯 곳 가운데 네 곳을 원문과 같은 순서로 봅니다. 파도가 몽돌을 굴리는 학동 해변, 풍차가 선 바람의언덕, '
+        '바다의 금강산 해금강을 지나 고현터미널을 거쳐 배를 만드는 원리를 체험하는 조선해양문화관에서 마칩니다.'),
+  (126, '학동몽돌해변 · 조선해양문화관 · 거제씨월드 · 양지암조각공원 · 옥포대첩기념공원 · 맹종죽테마공원',
+        '고현터미널 06:25 출발 → 19:18 복귀 · 약 13시간', '6-01', 6, 1, '06:25', '19:18', 773, 780,
+        '거제시 2일코스의 여섯 곳, 몽돌해변부터 맹종죽 숲까지',
+        '거제시 2일코스 열여섯 곳 가운데 여섯 곳을 원문과 같은 순서로 잇습니다. 학동 몽돌해변에서 시작해 지세포의 조선해양문화관과 거제씨월드, '
+        '능포 양지암조각공원, 옥포대첩기념공원을 지나 굵은 대나무가 자라는 맹종죽 숲에서 마칩니다.'),
+  (127, '바람의언덕 · 해금강 · 매미성',
+        '고현터미널 09:05 출발 → 18:55 복귀 · 약 10시간', '3-12', 3, 12, '09:05', '18:55', 590, 600,
+        '풍차 언덕과 바위섬, 돌로 쌓은 성',
+        '전망·명소로 분류한 세 곳만 봅니다. 풍차가 선 바람의언덕과 바다의 금강산이라 불리는 바위섬 해금강을 본 뒤, '
+        '고현터미널을 거쳐 태풍 매미로 농지를 잃은 백순삼 씨가 홀로 돌을 쌓아 만든 매미성으로 갑니다.'),
+  (128, '거제식물원 · 매미성 · 맹종죽테마공원',
+        '고현터미널 09:35 출발 → 17:18 복귀 · 약 7시간 30분', '3-13', 3, 13, '09:35', '17:18', 463, 450,
+        '유리 돔 식물원에서 매미성 지나 맹종죽 숲까지',
+        '정원·숲 두 곳에 전망·명소 한 곳을 더했습니다. 유리로 덮인 거제정글돔에서 열대 식물을 보고, '
+        '고현터미널을 거쳐 돌로 쌓은 성 매미성과 굵은 대나무가 자라는 맹종죽테마공원 숲으로 갑니다.'),
+  (129, '바람의언덕 · 해금강 · 학동몽돌해변 · 포로수용소',
+        '고현터미널 09:05 출발 → 19:40 복귀 · 약 10시간 30분', '4-12', 4, 12, '09:05', '19:40', 635, 630,
+        '거제 9경 네 곳, 바람의언덕에서 포로수용소 유적까지',
+        '거제시가 정한 거제 9경 가운데 1·2·4·6경을 봅니다. 바람의언덕과 해금강, 학동 흑진주 몽돌해변을 차례로 본 뒤 '
+        '고현터미널을 거쳐 6·25 전쟁 포로수용소 자리에 세운 유적공원에서 마칩니다.'),
+  (130, '매미성 · 양지암조각공원 · 학동몽돌해변 · 거제현 관아 · 포로수용소',
+        '고현터미널 08:02 출발 → 19:05 복귀 · 약 11시간', '5-04', 5, 4, '08:02', '19:05', 663, 660,
+        '매미성에서 옛 관아 지나 포로수용소 유적까지',
+        '북부 매미성, 동부 양지암조각공원, 남부 학동 몽돌해변, 서부 거제현 관아를 차례로 보고 고현터미널을 거쳐 '
+        '중부 포로수용소에서 마칩니다. 다섯 권역에서 한 곳씩이고, 그중 세 곳이 거제 9경(4·6·9경)입니다.')
+) AS v(course_id, course_name, summary, course_code, spot_count, rank_no, depart_time, return_time,
+       total_min, approx_total_min, title, intro);
+
+-- 스팟 — 도착은 앞 구간 도착, 출발은 다음 구간 출발. 체류 분 = 출발 - 도착.
+INSERT INTO course_pois (course_id, poi_id, poi_seq, is_fixed, arrive_time, leave_time, stay_min)
+SELECT v.course_id, p.poi_id, v.seq, true, v.arrive_time::time, v.leave_time::time, v.stay_min
+FROM (VALUES
+  (125, 1, '학동몽돌해변',     '07:05', '09:45', 160),
+  (125, 2, '바람의언덕',       '09:55', '11:45', 110),
+  (125, 3, '해금강',           '11:55', '14:48', 173),
+  (125, 4, '조선해양문화관',   '16:52', '17:57',  65),
+  (126, 1, '학동몽돌해변',     '07:05', '09:00', 115),
+  (126, 2, '조선해양문화관',   '09:27', '10:27',  60),
+  (126, 3, '거제씨월드',       '10:27', '12:57', 150),
+  (126, 4, '양지암조각공원',   '13:18', '14:22',  64),
+  (126, 5, '옥포대첩기념공원', '14:55', '16:45', 110),
+  (126, 6, '맹종죽테마공원',   '17:35', '18:57',  82),
+  (127, 1, '바람의언덕',       '09:55', '11:45', 110),
+  (127, 2, '해금강',           '11:55', '14:48', 173),
+  (127, 3, '매미성',           '16:47', '18:05',  78),
+  (128, 1, '거제식물원',       '10:05', '12:15', 130),
+  (128, 2, '매미성',           '13:47', '15:05',  78),
+  (128, 3, '맹종죽테마공원',   '15:35', '16:57',  82),
+  (129, 1, '바람의언덕',       '09:55', '11:45', 110),
+  (129, 2, '해금강',           '11:55', '14:48', 173),
+  (129, 3, '학동몽돌해변',     '15:00', '16:50', 110),
+  (129, 4, '포로수용소',       '18:07', '19:25',  78),
+  (130, 1, '매미성',           '08:47', '10:37', 110),
+  (130, 2, '양지암조각공원',   '11:30', '12:40',  70),
+  (130, 3, '학동몽돌해변',     '13:25', '15:00',  95),
+  (130, 4, '거제현 관아',      '15:20', '16:30',  70),
+  (130, 5, '포로수용소',       '17:37', '18:50',  73)
+) AS v(course_id, seq, short_name, arrive_time, leave_time, stay_min)
+JOIN pois p ON p.short_name = v.short_name;
+
+-- 구간 — 이름이 NULL 이면 고현터미널이다. 되짚기는 「A → NULL」 다음 「NULL → B」.
+INSERT INTO course_legs (course_id, leg_seq, from_poi_id, to_poi_id, mode,
+                         depart_time, arrive_time, duration_min, transfers, transfer_wait_min)
+SELECT v.course_id, v.leg_seq, pf.poi_id, pt.poi_id, v.mode::leg_mode,
+       v.depart_time::time, v.arrive_time::time, v.duration_min, 0, 0
+FROM (VALUES
+  -- 4-11 · 해금강에서 지세포로 가는 직행이 없어 고현터미널을 거친다
+  (125, 1, NULL,               '학동몽돌해변',     'BUS',       '06:25', '07:05', 40),
+  (125, 2, '학동몽돌해변',     '바람의언덕',       'BUS',       '09:45', '09:55', 10),
+  (125, 3, '바람의언덕',       '해금강',           'BUS',       '11:45', '11:55', 10),
+  (125, 4, '해금강',           NULL,               'BUS',       '14:48', '15:40', 52),
+  (125, 5, NULL,               '조선해양문화관',   'BUS',       '16:08', '16:52', 44),
+  (125, 6, '조선해양문화관',   NULL,               'BUS',       '17:57', '18:30', 33),
+  -- 6-01 · 모두 직행, 조선해양문화관 → 거제씨월드는 같은 지세포 정류장(도착 09:27 + 60분)
+  (126, 1, NULL,               '학동몽돌해변',     'BUS',       '06:25', '07:05', 40),
+  (126, 2, '학동몽돌해변',     '조선해양문화관',   'BUS',       '09:00', '09:27', 27),
+  (126, 3, '조선해양문화관',   '거제씨월드',       'SAME_STOP', '10:27', '10:27',  0),
+  (126, 4, '거제씨월드',       '양지암조각공원',   'BUS',       '12:57', '13:18', 21),
+  (126, 5, '양지암조각공원',   '옥포대첩기념공원', 'BUS',       '14:22', '14:55', 33),
+  (126, 6, '옥포대첩기념공원', '맹종죽테마공원',   'BUS',       '16:45', '17:35', 50),
+  (126, 7, '맹종죽테마공원',   NULL,               'BUS',       '18:57', '19:18', 21),
+  -- 3-12 · 해금강에서 매미성(대금교차로)으로 가는 직행이 없다
+  (127, 1, NULL,               '바람의언덕',       'BUS',       '09:05', '09:55', 50),
+  (127, 2, '바람의언덕',       '해금강',           'BUS',       '11:45', '11:55', 10),
+  (127, 3, '해금강',           NULL,               'BUS',       '14:48', '15:40', 52),
+  (127, 4, NULL,               '매미성',           'BUS',       '16:02', '16:47', 45),
+  (127, 5, '매미성',           NULL,               'BUS',       '18:05', '18:55', 50),
+  -- 3-13 · 거제식물원은 고현터미널과만 이어진다(코스재설계 §3 — 맨 앞에 둔다)
+  (128, 1, NULL,               '거제식물원',       'BUS',       '09:35', '10:05', 30),
+  (128, 2, '거제식물원',       NULL,               'BUS',       '12:15', '12:45', 30),
+  (128, 3, NULL,               '매미성',           'BUS',       '13:02', '13:47', 45),
+  (128, 4, '매미성',           '맹종죽테마공원',   'BUS',       '15:05', '15:35', 30),
+  (128, 5, '맹종죽테마공원',   NULL,               'BUS',       '16:57', '17:18', 21),
+  -- 4-12 · 포로수용소는 고현터미널과만 이어진다(맨 뒤에 둔다)
+  (129, 1, NULL,               '바람의언덕',       'BUS',       '09:05', '09:55', 50),
+  (129, 2, '바람의언덕',       '해금강',           'BUS',       '11:45', '11:55', 10),
+  (129, 3, '해금강',           '학동몽돌해변',     'BUS',       '14:48', '15:00', 12),
+  (129, 4, '학동몽돌해변',     NULL,               'BUS',       '16:50', '17:30', 40),
+  (129, 5, NULL,               '포로수용소',       'BUS',       '17:51', '18:07', 16),
+  (129, 6, '포로수용소',       NULL,               'BUS',       '19:25', '19:40', 15),
+  -- 5-04 · 포로수용소를 맨 뒤에 둔다
+  (130, 1, NULL,               '매미성',           'BUS',       '08:02', '08:47', 45),
+  (130, 2, '매미성',           '양지암조각공원',   'BUS',       '10:37', '11:30', 53),
+  (130, 3, '양지암조각공원',   '학동몽돌해변',     'BUS',       '12:40', '13:25', 45),
+  (130, 4, '학동몽돌해변',     '거제현 관아',      'BUS',       '15:00', '15:20', 20),
+  (130, 5, '거제현 관아',      NULL,               'BUS',       '16:30', '17:03', 33),
+  (130, 6, NULL,               '포로수용소',       'BUS',       '17:25', '17:37', 12),
+  (130, 7, '포로수용소',       NULL,               'BUS',       '18:50', '19:05', 15)
+) AS v(course_id, leg_seq, from_name, to_name, mode, depart_time, arrive_time, duration_min)
+LEFT JOIN pois pf ON pf.short_name = v.from_name
+LEFT JOIN pois pt ON pt.short_name = v.to_name;
+
+-- 탄 버스 — 정류장 이름은 원문 시간표 이름(pois.timetable_stop 과 같다). 추정은 시각 칸이 없는 정류장에만.
+-- 평일만 있는 편은 끝에 표시했다(holidayService 거짓의 이유).
+INSERT INTO course_rides (leg_id, ride_seq, route_no, board_stop, board_time, board_estimated,
+                          alight_stop, alight_time, alight_estimated)
+SELECT l.leg_id, 1, v.route_no, v.board_stop, v.board_time::time, v.board_estimated,
+       v.alight_stop, v.alight_time::time, v.alight_estimated
+FROM (VALUES
+  (125, 1, '55',    '고현',             '06:25', false, '학동',             '07:05', false),
+  (125, 2, '55',    '학동',             '09:45', false, '도장포',           '09:55', true),
+  (125, 3, '55',    '도장포',           '11:45', true,  '해금강',           '11:55', false),
+  (125, 4, '55',    '해금강',           '14:48', false, '고현',             '15:40', false),
+  (125, 5, '22',    '고현',             '16:08', false, '지세포',           '16:52', false),  -- 평일만
+  (125, 6, '4000',  '지세포',           '17:57', false, '고현',             '18:30', false),
+  (126, 1, '55',    '고현',             '06:25', false, '학동',             '07:05', false),
+  (126, 2, '67-1',  '학동',             '09:00', false, '지세포',           '09:27', false),
+  (126, 4, '60',    '지세포',           '12:57', false, '능포',             '13:18', false),
+  (126, 5, '32',    '능포',             '14:22', false, '옥포대첩기념공원', '14:55', true),
+  (126, 6, '32',    '옥포대첩기념공원', '16:45', true,  '맹종죽테마파크',   '17:35', true),
+  (126, 7, '31',    '맹종죽테마파크',   '18:57', true,  '고현',             '19:18', false),
+  (127, 1, '55',    '고현',             '09:05', false, '도장포',           '09:55', true),
+  (127, 2, '55',    '도장포',           '11:45', true,  '해금강',           '11:55', false),
+  (127, 3, '55',    '해금강',           '14:48', false, '고현',             '15:40', false),
+  (127, 4, '32-2',  '고현',             '16:02', false, '대금교차로',       '16:47', true),
+  (127, 5, '33-2',  '대금교차로',       '18:05', true,  '고현',             '18:55', false),
+  (128, 1, '50-2',  '고현',             '09:35', false, '식물원',           '10:05', true),
+  (128, 2, '50-2',  '식물원',           '12:15', true,  '고현',             '12:45', false),
+  (128, 3, '33',    '고현',             '13:02', false, '대금교차로',       '13:47', true),
+  (128, 4, '32',    '대금교차로',       '15:05', true,  '맹종죽테마파크',   '15:35', true),
+  (128, 5, '31',    '맹종죽테마파크',   '16:57', true,  '고현',             '17:18', false),
+  (129, 1, '55',    '고현',             '09:05', false, '도장포',           '09:55', true),
+  (129, 2, '55',    '도장포',           '11:45', true,  '해금강',           '11:55', false),
+  (129, 3, '55',    '해금강',           '14:48', false, '학동',             '15:00', false),
+  (129, 4, '55',    '학동',             '16:50', false, '고현',             '17:30', false),
+  (129, 5, '100',   '고현',             '17:51', false, '포로수용소',       '18:07', true),   -- 평일만
+  (129, 6, '110',   '포로수용소',       '19:25', true,  '고현',             '19:40', false),  -- 평일만
+  (130, 1, '32',    '고현',             '08:02', false, '대금교차로',       '08:47', true),
+  (130, 2, '32-1',  '대금교차로',       '10:37', true,  '능포',             '11:30', false),
+  (130, 3, '67-1',  '능포',             '12:40', false, '학동',             '13:25', false),
+  (130, 4, '55',    '학동',             '15:00', false, '거제',             '15:20', false),
+  (130, 5, '50',    '거제',             '16:30', false, '고현',             '17:03', false),
+  (130, 6, '100-1', '고현',             '17:25', false, '포로수용소',       '17:37', true),   -- 평일만
+  (130, 7, '110',   '포로수용소',       '18:50', true,  '고현',             '19:05', false)   -- 평일만
+) AS v(course_id, leg_seq, route_no, board_stop, board_time, board_estimated, alight_stop, alight_time, alight_estimated)
+JOIN course_legs l ON l.course_id = v.course_id AND l.leg_seq = v.leg_seq;
+
+-- 9경 수 — V28 규칙 그대로 공식 번호가 있는 스팟 수로 센다(4-11 3 · 6-01 1 · 3-12 3 · 3-13 2 · 4-12 4 · 5-04 3).
+UPDATE courses c SET nine_scenic_count = (
+  SELECT count(p.nine_scenic_no) FROM course_pois cp JOIN pois p ON p.poi_id = cp.poi_id
+  WHERE cp.course_id = c.course_id)
+WHERE c.course_id BETWEEN 125 AND 130;
+
+-- 4) 대표 일곱 — 코드로 찾는다 --------------------------------------------------
+UPDATE courses c SET featured_rank = v.featured_rank, badge_axis = v.badge_axis,
+                     official_code = v.official_code, official_matched = v.official_matched,
+                     official_order_kept = v.official_order_kept
+FROM (VALUES
+  ('4-11', 1, 'OFFICIAL', 'DAY',     4,    true),
+  ('6-01', 2, 'OFFICIAL', 'TWO_DAY', 6,    true),
+  ('3-12', 3, 'THEME',    NULL,      NULL, NULL),
+  ('3-13', 4, 'THEME',    NULL,      NULL, NULL),
+  ('3-11', 5, 'THEME',    NULL,      NULL, NULL),
+  ('4-12', 6, 'NINE',     NULL,      NULL, NULL),
+  ('5-04', 7, 'NINE',     NULL,      NULL, NULL)
+) AS v(course_code, featured_rank, badge_axis, official_code, official_matched, official_order_kept)
+WHERE c.course_code = v.course_code;
+
+-- CourseSeeder 가 기동마다 시퀀스를 max 로 맞추지만, 마이그레이션만 돈 DB 에서도 다음 nextval 이 부딪히지 않게 여기서도 맞춘다.
+SELECT setval('courses_course_id_seq', (SELECT max(course_id) FROM courses));
+
+-- 5) 적재 확인 — 조용히 빠진 줄이 없는지 여기서 멈춰 잡는다 ---------------------------
+DO $$
+DECLARE r record;
+BEGIN
+  -- 코스마다 구간 사슬(스팟 이름)과 승차를 글로 다시 만들어 기대값과 맞춘다 — 이름을 잘못 찾아 NULL(고현터미널)이 되면 여기서 걸린다
+  FOR r IN
+    SELECT v.code, v.chain, v.rides,
+           (SELECT string_agg(COALESCE(pf.short_name, '고현터미널') || '>' || COALESCE(pt.short_name, '고현터미널'), ' ' ORDER BY l.leg_seq)
+            FROM course_legs l JOIN courses c ON c.course_id = l.course_id
+            LEFT JOIN pois pf ON pf.poi_id = l.from_poi_id LEFT JOIN pois pt ON pt.poi_id = l.to_poi_id
+            WHERE c.course_code = v.code) AS got_chain,
+           (SELECT string_agg(x.route_no || ' ' || to_char(x.board_time, 'HH24:MI') || '→' || to_char(x.alight_time, 'HH24:MI'), ' | ' ORDER BY l.leg_seq)
+            FROM course_legs l JOIN courses c ON c.course_id = l.course_id JOIN course_rides x ON x.leg_id = l.leg_id
+            WHERE c.course_code = v.code) AS got_rides
+    FROM (VALUES
+      ('4-11', '고현터미널>학동몽돌해변 학동몽돌해변>바람의언덕 바람의언덕>해금강 해금강>고현터미널 고현터미널>조선해양문화관 조선해양문화관>고현터미널',
+               '55 06:25→07:05 | 55 09:45→09:55 | 55 11:45→11:55 | 55 14:48→15:40 | 22 16:08→16:52 | 4000 17:57→18:30'),
+      ('6-01', '고현터미널>학동몽돌해변 학동몽돌해변>조선해양문화관 조선해양문화관>거제씨월드 거제씨월드>양지암조각공원 양지암조각공원>옥포대첩기념공원 옥포대첩기념공원>맹종죽테마공원 맹종죽테마공원>고현터미널',
+               '55 06:25→07:05 | 67-1 09:00→09:27 | 60 12:57→13:18 | 32 14:22→14:55 | 32 16:45→17:35 | 31 18:57→19:18'),
+      ('3-12', '고현터미널>바람의언덕 바람의언덕>해금강 해금강>고현터미널 고현터미널>매미성 매미성>고현터미널',
+               '55 09:05→09:55 | 55 11:45→11:55 | 55 14:48→15:40 | 32-2 16:02→16:47 | 33-2 18:05→18:55'),
+      ('3-13', '고현터미널>거제식물원 거제식물원>고현터미널 고현터미널>매미성 매미성>맹종죽테마공원 맹종죽테마공원>고현터미널',
+               '50-2 09:35→10:05 | 50-2 12:15→12:45 | 33 13:02→13:47 | 32 15:05→15:35 | 31 16:57→17:18'),
+      ('4-12', '고현터미널>바람의언덕 바람의언덕>해금강 해금강>학동몽돌해변 학동몽돌해변>고현터미널 고현터미널>포로수용소 포로수용소>고현터미널',
+               '55 09:05→09:55 | 55 11:45→11:55 | 55 14:48→15:00 | 55 16:50→17:30 | 100 17:51→18:07 | 110 19:25→19:40'),
+      ('5-04', '고현터미널>매미성 매미성>양지암조각공원 양지암조각공원>학동몽돌해변 학동몽돌해변>거제현 관아 거제현 관아>고현터미널 고현터미널>포로수용소 포로수용소>고현터미널',
+               '32 08:02→08:47 | 32-1 10:37→11:30 | 67-1 12:40→13:25 | 55 15:00→15:20 | 50 16:30→17:03 | 100-1 17:25→17:37 | 110 18:50→19:05')
+    ) AS v(code, chain, rides)
+  LOOP
+    IF r.got_chain IS DISTINCT FROM r.chain THEN
+      RAISE EXCEPTION 'V37: % 구간 사슬이 다르다 — %', r.code, r.got_chain; END IF;
+    IF r.got_rides IS DISTINCT FROM r.rides THEN
+      RAISE EXCEPTION 'V37: % 승차가 다르다 — %', r.code, r.got_rides; END IF;
+  END LOOP;
+
+  IF (SELECT count(*) FROM course_pois WHERE course_id BETWEEN 125 AND 130) <> 25 THEN
+    RAISE EXCEPTION 'V37: 새 코스 스팟이 25개가 아니다'; END IF;
+  IF EXISTS (SELECT 1 FROM courses c
+             WHERE c.course_id BETWEEN 125 AND 130
+               AND c.spot_count <> (SELECT count(*) FROM course_pois cp WHERE cp.course_id = c.course_id)) THEN
+    RAISE EXCEPTION 'V37: spot_count 와 스팟 수가 다른 새 코스가 있다'; END IF;
+  IF (SELECT count(*) FROM course_legs WHERE course_id BETWEEN 125 AND 130) <> 36 THEN
+    RAISE EXCEPTION 'V37: 새 코스 구간이 36개가 아니다'; END IF;
+  IF (SELECT count(*) FROM course_rides x JOIN course_legs l ON l.leg_id = x.leg_id
+      WHERE l.course_id BETWEEN 125 AND 130) <> 35 THEN
+    RAISE EXCEPTION 'V37: 새 코스 승차가 35개가 아니다'; END IF;
+  -- 대표 일곱 — 순서 1~7 이 빠짐없이, 축이 원문대로
+  IF (SELECT string_agg(featured_rank || ' ' || course_code || ' ' || badge_axis, ', ' ORDER BY featured_rank)
+      FROM courses WHERE featured_rank IS NOT NULL)
+     IS DISTINCT FROM '1 4-11 OFFICIAL, 2 6-01 OFFICIAL, 3 3-12 THEME, 4 3-13 THEME, 5 3-11 THEME, 6 4-12 NINE, 7 5-04 NINE' THEN
+    RAISE EXCEPTION 'V37: 대표 일곱의 순서 · 축이 다르다'; END IF;
+  -- 겹친 곳 수는 원문 칸 수를 넘을 수 없다
+  IF EXISTS (SELECT 1 FROM courses c JOIN official_courses o ON o.official_code = c.official_code
+             WHERE c.official_matched > o.place_count) THEN
+    RAISE EXCEPTION 'V37: 거제시 코스와 겹친 곳이 원문 칸 수보다 많다'; END IF;
+  IF (SELECT string_agg(course_code || ' ' || nine_scenic_count, ', ' ORDER BY course_code)
+      FROM courses WHERE course_id BETWEEN 125 AND 130)
+     IS DISTINCT FROM '3-12 3, 3-13 2, 4-11 3, 4-12 4, 5-04 3, 6-01 1' THEN
+    RAISE EXCEPTION 'V37: 새 코스 9경 수가 다르다'; END IF;
+END $$;

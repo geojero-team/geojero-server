@@ -10,7 +10,6 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -35,9 +34,13 @@ import org.springframework.web.server.ResponseStatusException;
  * **목록에는 추천 코스만 담는다.** §3 검증 코스 3종은 화면에 뜨지 않지만
  * saved_trips.course_id 가 가리킬 수 있어 상세 조회는 된다(구간 없이 이름·요약만).
  *
- * 2026-09-14 v3(Figma 582:416): 3/4/5곳 칩을 없애고 **대표 코스 10개**를 카드로 보여준다 —
+ * 2026-09-14 v3(Figma 582:416): 3/4/5곳 칩을 없애고 **대표 코스**를 카드로 보여준다 —
  * {@code featured=true}. 카드가 새로 말하는 것(제목·9경 번호·노선·하루 회차·휴일 운행)은 대표 코스가
- * 아니어도 전부 채운다. 순위 규칙은 서버가 런타임에 계산한다 — 코스를 다시 적재해도 순서가 따라온다.
+ * 아니어도 전부 채운다.
+ *
+ * 2026-09-17 코스 재설계 2차 세트(V37): 대표 코스는 **사람이 고른 일곱**이고 순서는 {@code featured_rank} 다.
+ * 옛 규칙(9경 많은 순 · 버스 짧은 순)은 버렸다 — 카드 배지가 전부 「거제 9경 · N경」이라 코스마다 무엇이 다른지
+ * 화면이 말하지 않았다. 카드마다 어느 성격 축으로 골랐는지(badgeAxis)와 거제시 공식 코스 대조(officialCourse)가 붙는다.
  */
 @RestController
 public class CourseController {
@@ -46,8 +49,6 @@ public class CourseController {
   /** 모든 코스의 출발·복귀 지점. 기획 결정으로 고현터미널 고정(기준문서 §6). */
   private static final String ORIGIN_NAME = "고현터미널";
   private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
-  /** 대표 코스 수(사용자 결정 2026-09-14). */
-  private static final int FEATURED_LIMIT = 10;
   private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
   public record CourseDto(long courseId, String name, String theme, String summary) {}
@@ -75,6 +76,16 @@ public class CourseController {
   public record TripsPerDay(int weekday, int holiday) {}
 
   /**
+   * 거제시 공식 관광코스와의 대조(V37 official_courses). 카드 배지 「거제시 당일코스 · 6곳 중 4곳」의 근거다.
+   *   name       원문 코스 이름(「당일코스」 · 「2일코스」)
+   *   total      원문 장소 칸 수 — 다리(거제대교 · 거가대교)와 HTML 주석 안의 칸은 세지 않는다
+   *   matched    그중 이 코스 스팟이 든 칸 수
+   *   orderKept  방문 순서가 원문 나열 순서와 같은가
+   *   sourceUrl  원문 페이지(tour.geoje.go.kr)
+   */
+  public record OfficialCourse(String name, int total, int matched, boolean orderKept, String sourceUrl) {}
+
+  /**
    * ★ {@code busMinTotal} 이 이 서비스가 소유한 숫자다 — 구간 이동시간의 합이다.
    *
    * {@code approxTotalMin}(약 8시간 30분)은 출발부터 복귀까지의 **경과 시간**이라
@@ -88,10 +99,17 @@ public class CourseController {
    *   busRoutes         — 탄 노선 번호, 구간·승차 순서대로 중복 없이
    *   tripsPerDay       — 노선이 하나일 때만(위 TripsPerDay)
    *   holidayService    — 모든 승차가 휴일 시간표에도 같은 시각으로 있는가
+   *
+   * 코스 재설계 2차 세트(2026-09-17, V37)가 더 말하는 것 — 대표가 아닌 코스는 셋 다 null 이다:
+   *   featuredRank      — 대표 목록 순서(사람이 고른 순서)
+   *   badgeAxis         — 어느 성격 축으로 골랐나: OFFICIAL 거제시 공식 코스 · THEME 분류 · NINE 거제 9경.
+   *                       분류 구성은 spots[].theme, 9경은 nineScenicNos, 배는 ferryMinTotal 로 화면이 센다
+   *   officialCourse    — badgeAxis 가 OFFICIAL 일 때만(위 OfficialCourse)
    */
   public record CourseCard(long courseId, String courseCode, int spotCount, int rank,
       int nineScenicCount, String name, String summary,
       String title, String intro,
+      Integer featuredRank, String badgeAxis, OfficialCourse officialCourse,
       List<Integer> nineScenicNos, List<String> busRoutes,
       TripsPerDay tripsPerDay, boolean holidayService,
       String departAt, String returnAt, int approxTotalMin, String approxTotalText,
@@ -184,8 +202,8 @@ public class CourseController {
 
   /**
    * @param spotCount 3·4·5 로 거른다. 없으면 전량.
-   * @param featured  true 면 대표 코스 10개만 — 9경이 많고, 버스 시간이 짧고, 스팟이 적은 순(같으면 코드 순).
-   *                  spotCount 와 같이 오면 거른 뒤 고른다.
+   * @param featured  true 면 대표 코스만(featured_rank 가 있는 코스) — **featured_rank 순서 그대로**(V37).
+   *                  spotCount 와 같이 오면 둘 다 거른다.
    */
   @GetMapping("/api/courses")
   public CoursesRes courses(@RequestParam(required = false) Integer spotCount,
@@ -200,32 +218,24 @@ public class CourseController {
     }
 
     // 파라미터를 `? IS NULL` 로 비교하면 Postgres가 타입을 못 정한다(500). SQL을 갈라 만든다.
+    boolean featuredOnly = Boolean.TRUE.equals(featured);
     String sql = """
-        SELECT course_id, course_code, spot_count, rank_no, nine_scenic_count,
-               course_name, summary, title, intro, depart_time, return_time, approx_total_min
-        FROM courses
-        WHERE course_code IS NOT NULL AND enabled""";
-    var rows = spotCount == null
-        ? jdbc.queryForList(sql + " ORDER BY spot_count, rank_no")
-        : jdbc.queryForList(sql + " AND spot_count = ? ORDER BY spot_count, rank_no", spotCount);
+        SELECT c.course_id, c.course_code, c.spot_count, c.rank_no, c.nine_scenic_count,
+               c.course_name, c.summary, c.title, c.intro, c.depart_time, c.return_time, c.approx_total_min,
+               c.featured_rank, c.badge_axis, c.official_matched, c.official_order_kept,
+               o.name AS official_name, o.place_count AS official_total, o.source_url AS official_source_url
+        FROM courses c
+        LEFT JOIN official_courses o ON o.official_code = c.official_code
+        WHERE c.course_code IS NOT NULL AND c.enabled"""
+        + (featuredOnly ? " AND c.featured_rank IS NOT NULL" : "")
+        + (spotCount == null ? "" : " AND c.spot_count = ?")
+        // 대표 목록은 사람이 고른 순서다 — 옛 「9경 많은 순 · 버스 짧은 순」 정렬은 V37 에서 버렸다.
+        + (featuredOnly ? " ORDER BY c.featured_rank" : " ORDER BY c.spot_count, c.rank_no");
+    var rows = spotCount == null ? jdbc.queryForList(sql) : jdbc.queryForList(sql, spotCount);
 
     // 구간 이동시간 합을 한 번에 받아 둔다 — 카드마다 물으면 코스 수만큼 쿼리가 늘어난다.
     var busMin = busMinByCourse();
     var ferryMin = ferryMinByCourse();
-
-    // 대표 코스 — 9경이 많고(nine_scenic_count DESC), 버스가 짧고(ASC), 스팟이 적고(ASC), 코드 순.
-    // SQL 이 아니라 여기서 고르는 이유: 버스 시간 합이 course_legs 에서 오고 이미 받아 뒀다.
-    if (Boolean.TRUE.equals(featured)) {
-      // 「이동이 짧은 코스 먼저」라는 뜻이라 **배도 이동으로 센다** — 버스만 세면 배 코스가
-      // 실제보다 짧아 보여 앞으로 온다(3-11 은 버스 102분이지만 배가 160분이다).
-      rows.sort(Comparator
-          .comparingLong((Map<String, Object> r) -> num(r.get("nine_scenic_count"))).reversed()
-          .thenComparingInt(r -> busMin.getOrDefault(num(r.get("course_id")), 0)
-              + ferryMin.getOrDefault(num(r.get("course_id")), 0))
-          .thenComparingLong(r -> num(r.get("spot_count")))
-          .thenComparing(r -> (String) r.get("course_code")));
-      rows = new ArrayList<>(rows.subList(0, Math.min(FEATURED_LIMIT, rows.size())));
-    }
 
     // 노선·9경 번호도 한 번에 받아 course_id 로 묶는다(busMinByCourse 와 같은 방식).
     var rides = ridesByCourse();
@@ -244,6 +254,7 @@ public class CourseController {
           (int) num(c.get("nine_scenic_count")),
           (String) c.get("course_name"), (String) c.get("summary"),
           (String) c.get("title"), (String) c.get("intro"),
+          (Integer) c.get("featured_rank"), (String) c.get("badge_axis"), officialCourse(c),
           nineNos.getOrDefault(id, List.of()), routes,
           tripsPerDay(routes, days), holidayService(courseRides, days.holiday()),
           hm(c.get("depart_time")), hm(c.get("return_time")),
@@ -254,6 +265,14 @@ public class CourseController {
           spotBriefs(id)));
     }
     return new CoursesRes(counts, cards);
+  }
+
+  /** 목록 한 줄의 거제시 공식 코스 대조. 가리키는 코스가 없으면 null(V37 CHECK 가 OFFICIAL 축과 묶는다). */
+  private static OfficialCourse officialCourse(Map<String, Object> c) {
+    if (c.get("official_name") == null) return null;
+    return new OfficialCourse((String) c.get("official_name"), (int) num(c.get("official_total")),
+        (int) num(c.get("official_matched")), Boolean.TRUE.equals(c.get("official_order_kept")),
+        (String) c.get("official_source_url"));
   }
 
   /**

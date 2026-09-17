@@ -24,15 +24,17 @@ class CourseApiTest {
 
   /**
    * 칩마다 개수를 띄우고 0이면 비활성해야 한다. 3·4곳은 순위 상위 10개, 5곳은 섬 코스를 뺀 뒤
-   * 가능한 3개 전부다(V20). 배 시간표를 받아 섬 코스를 넣으면 이 숫자가 바뀐다.
+   * 가능한 3개 전부다(V20). V36 이 3-11 을, V37 이 2차 세트 새 코스 6개(3곳 둘 · 4곳 둘 · 5곳 하나 · 6곳 하나)를 더했다.
+   * counts 는 지금 계약 그대로 3·4·5 세 칸이다 — 6곳 코스(6-01)는 칸이 없다.
    */
   @Test void 코스목록_칩별_개수를_내려준다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(24))  // V36 이 배 코스 3-11 을 더했다
-        .andExpect(jsonPath("$.counts['3']").value(11))  // 3-11 포함
-        .andExpect(jsonPath("$.counts['4']").value(10))
-        .andExpect(jsonPath("$.counts['5']").value(3));
+        .andExpect(jsonPath("$.courses.length()").value(30))
+        .andExpect(jsonPath("$.counts['3']").value(13))
+        .andExpect(jsonPath("$.counts['4']").value(12))
+        .andExpect(jsonPath("$.counts['5']").value(4))
+        .andExpect(jsonPath("$.counts['6']").doesNotExist());
   }
 
   /** 카드 한 장을 그리는 데 필요한 것이 다 실려야 한다 — 썸네일·순서·9경 수·총 시간. */
@@ -64,47 +66,96 @@ class CourseApiTest {
   @Test void 코스목록_개수로_걸러진다() throws Exception {
     mvc.perform(get("/api/courses?spotCount=5"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(3))
+        .andExpect(jsonPath("$.courses.length()").value(4))
         .andExpect(jsonPath("$.courses[*].courseCode")
-            .value(org.hamcrest.Matchers.contains("5-01", "5-02", "5-03")));
+            .value(org.hamcrest.Matchers.contains("5-01", "5-02", "5-03", "5-04")));
   }
 
   /**
-   * 4곳은 이제 10개다 — 전에는 섬(내도) 코스만 있어 0개였고 화면이 빈 상태를 그렸다.
+   * 4곳은 12개다 — V20 의 10개에 V37 의 4-11 · 4-12. 전에는 섬(내도) 코스만 있어 0개였고 화면이 빈 상태를 그렸다.
    * 걸러도 counts 는 전량을 센다(칩이 다른 개수도 보여줘야 한다).
    */
-  @Test void 코스목록_네곳은_10개이고_순위순이다() throws Exception {
+  @Test void 코스목록_네곳은_12개이고_순위순이다() throws Exception {
     mvc.perform(get("/api/courses?spotCount=4"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(10))
+        .andExpect(jsonPath("$.courses.length()").value(12))
         .andExpect(jsonPath("$.courses[0].courseCode").value("4-01"))
         .andExpect(jsonPath("$.courses[9].courseCode").value("4-10"))
-        .andExpect(jsonPath("$.counts['3']").value(11));
+        .andExpect(jsonPath("$.courses[11].courseCode").value("4-12"))
+        .andExpect(jsonPath("$.counts['3']").value(13));
   }
 
   // ── 목록: 대표 코스 카드 v3 (Figma 582:416 · 585:417 · 585:485, 2026-09-14) ──────
 
   /**
-   * ★ 대표 코스 10개 — 3/4/5곳 칩을 없애고 카드 10장만 보여준다(사용자 결정 2026-09-14).
-   * 규칙: nine_scenic_count DESC, 버스 시간 합 ASC, spot_count ASC, course_code ASC.
-   * 서버가 런타임에 고르므로 코스를 다시 적재하면 순서가 따라온다 — 기대값은 V20 적재분에 V28 이 9경 수를
-   * 공식 표로 다시 센 값이다(매미성이 든 4-03 이 +1 되어 4-10 대신 10위).
+   * ★ 대표 코스 — 코스 재설계 2차 세트 일곱(V37, 코스재설계 §5-1). **featured_rank 순서 그대로** 준다.
+   * 옛 규칙(9경 많은 순 · 버스 짧은 순)은 버렸다 — 카드 10장의 배지가 전부 「거제 9경 · N경」이라 코스마다 무엇이
+   * 다른지 화면이 말하지 않았다(사용자 지적). 이제 사람이 성격 축 셋으로 골라 순서를 박는다.
    */
-  @Test void 대표코스는_10개이고_9경_많고_버스_짧은_순이다() throws Exception {
+  @Test void 대표코스는_일곱이고_featured_rank_순이다() throws Exception {
     mvc.perform(get("/api/courses?featured=true"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.courses.length()").value(10))
+        .andExpect(jsonPath("$.courses.length()").value(7))
         .andExpect(jsonPath("$.courses[*].courseCode")
             .value(org.hamcrest.Matchers.contains(
-                "3-01", "3-06", "3-02", "4-09", "3-04", "3-03", "5-01", "3-05", "4-02", "4-03")))
-        // 칩은 없어졌지만 counts 는 그대로 준다 — 지도 화면 등 다른 호출과 응답 모양이 같아야 한다
-        .andExpect(jsonPath("$.counts['3']").value(11));
+                "4-11", "6-01", "3-12", "3-13", "3-11", "4-12", "5-04")))
+        .andExpect(jsonPath("$.courses[*].featuredRank")
+            .value(org.hamcrest.Matchers.contains(1, 2, 3, 4, 5, 6, 7)))
+        // 칩은 클라가 대표 목록 안에서 센다. counts 는 그대로 준다 — 다른 호출과 응답 모양이 같아야 한다
+        .andExpect(jsonPath("$.counts['3']").value(13));
   }
 
-  /** featured 없이 부르면 전과 같다 — 23개 전량(코스 지도 화면이 쓴다). */
-  @Test void featured_없이_부르면_23개_그대로다() throws Exception {
+  /**
+   * 카드 첫 줄 배지가 무엇인지 — 이 코스를 어느 성격 축으로 골랐나(badgeAxis). 우리 큐레이션 선택이라 저장이 정직하다.
+   * 분류 구성은 spots[].theme 로, 9경은 nineScenicNos 로, 배는 ferryMinTotal 로 클라가 센다(코스재설계 §5-3).
+   */
+  @Test void 대표코스마다_성격축이_실린다() throws Exception {
+    mvc.perform(get("/api/courses?featured=true"))
+        .andExpect(jsonPath("$.courses[*].badgeAxis")
+            .value(org.hamcrest.Matchers.contains(
+                "OFFICIAL", "OFFICIAL", "THEME", "THEME", "THEME", "NINE", "NINE")));
+  }
+
+  /**
+   * 거제시 공식 코스 — 원문(tour.geoje.go.kr 관광코스)이 묶은 장소 수 · 이 코스와 겹친 곳 수 · 원문 순서 그대로인가.
+   * 당일코스는 여섯 곳 중 네 곳(학동 · 바람의언덕 · 해금강 · 조선해양문화관, 원문 순서와 같다),
+   * 2일코스는 열여섯 곳 중 여섯 곳(원문 1일차의 학동 뒤로 2일차의 조선해양문화관 · 씨월드 · 양지암 · 옥포 · 맹종죽 — 순서가 같다).
+   */
+  @Test void 공식코스_축의_카드에는_거제시_원문_대조가_실린다() throws Exception {
+    mvc.perform(get("/api/courses?featured=true"))
+        .andExpect(jsonPath("$.courses[0].officialCourse.name").value("당일코스"))
+        .andExpect(jsonPath("$.courses[0].officialCourse.total").value(6))
+        .andExpect(jsonPath("$.courses[0].officialCourse.matched").value(4))
+        .andExpect(jsonPath("$.courses[0].officialCourse.orderKept").value(true))
+        .andExpect(jsonPath("$.courses[0].officialCourse.sourceUrl")
+            .value("https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000"))
+        .andExpect(jsonPath("$.courses[1].officialCourse.name").value("2일코스"))
+        .andExpect(jsonPath("$.courses[1].officialCourse.total").value(16))
+        .andExpect(jsonPath("$.courses[1].officialCourse.matched").value(6))
+        .andExpect(jsonPath("$.courses[1].officialCourse.orderKept").value(true))
+        .andExpect(jsonPath("$.courses[1].officialCourse.sourceUrl")
+            .value("https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000"))
+        // 다른 축은 공식 코스가 없다 — 필드는 null 로 온다
+        .andExpect(jsonPath("$.courses[2].officialCourse").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.courses[6].officialCourse").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  /** 대표가 아닌 코스는 순서 · 성격 축 · 공식 코스가 전부 null 이다 — 같은 카드 모양에 값만 빈다. */
+  @Test void 대표가_아닌_코스는_순서와_성격축이_없다() throws Exception {
     mvc.perform(get("/api/courses"))
-        .andExpect(jsonPath("$.courses.length()").value(24))  // V36 이 배 코스 3-11 을 더했다
+        .andExpect(jsonPath("$.courses[0].courseCode").value("3-01"))
+        .andExpect(jsonPath("$.courses[0].featuredRank").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.courses[0].badgeAxis").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.courses[0].officialCourse").value(org.hamcrest.Matchers.nullValue()))
+        // featured 없이 불러도 대표 코스에는 값이 실린다 — 카드 한 장이 어느 목록에서 왔든 같은 말을 한다
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '4-11')].featuredRank").value(1))
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '4-11')].badgeAxis").value("OFFICIAL"));
+  }
+
+  /** featured 없이 부르면 전량이다 — 30개(코스 지도 화면이 쓴다). */
+  @Test void featured_없이_부르면_전량이다() throws Exception {
+    mvc.perform(get("/api/courses"))
+        .andExpect(jsonPath("$.courses.length()").value(30))
         // 새 필드는 대표 코스가 아니어도 채운다 — 카드 한 장이 어느 목록에서 왔든 같은 모양이다
         .andExpect(jsonPath("$.courses[22].busRoutes").isArray())
         .andExpect(jsonPath("$.courses[22].nineScenicNos").isArray());
@@ -115,7 +166,7 @@ class CourseApiTest {
    * 55번은 매일 같아(§2 「50번대 전체 매일 동일」) 평일·휴일 둘 다 6이다(BIS 표지 「1일 6회」).
    */
   @Test void 대표코스_카드에_제목_9경번호_노선_배차_요일이_실린다() throws Exception {
-    mvc.perform(get("/api/courses?featured=true"))
+    mvc.perform(get("/api/courses"))
         .andExpect(jsonPath("$.courses[0].courseCode").value("3-01"))
         .andExpect(jsonPath("$.courses[0].title").value("환승 없이 남부 9경 세 곳"))
         .andExpect(jsonPath("$.courses[0].intro").isString())
@@ -134,13 +185,13 @@ class CourseApiTest {
    * 않는 숫자가 된다. 3-02 의 22-1 은 20번대라 평일/휴일이 갈라져(§2) 휴일에 그 회차가 없다 → holidayService false.
    */
   @Test void 노선이_여럿이면_배차횟수가_없고_휴일운행이_아니다() throws Exception {
-    mvc.perform(get("/api/courses?featured=true"))
-        .andExpect(jsonPath("$.courses[2].courseCode").value("3-02"))
+    mvc.perform(get("/api/courses"))
+        .andExpect(jsonPath("$.courses[1].courseCode").value("3-02"))
         // 구간·승차 순서대로, 중복 없이(55번은 두 번 타지만 한 번만)
-        .andExpect(jsonPath("$.courses[2].busRoutes")
+        .andExpect(jsonPath("$.courses[1].busRoutes")
             .value(org.hamcrest.Matchers.contains("22-1", "67-1", "55")))
-        .andExpect(jsonPath("$.courses[2].tripsPerDay").value(org.hamcrest.Matchers.nullValue()))
-        .andExpect(jsonPath("$.courses[2].holidayService").value(false));
+        .andExpect(jsonPath("$.courses[1].tripsPerDay").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.courses[1].holidayService").value(false));
   }
 
   /**
@@ -150,12 +201,16 @@ class CourseApiTest {
    * 3-11(배 코스, V36)도 참이다 — 55번 한 노선이고 55번은 평일·휴일 시각이 같다.
    * ⚠️ 배는 여기서 안 본다. holidayService 는 **승차(course_rides)**로만 판정하는데 배는 승차가 없다.
    * 유람선은 요일이 아니라 날짜마다 운항이 다르므로(부록 G) 그 판단은 화면의 배 시간표가 한다.
+   *
+   * V37 새 코스 여섯 중 셋(6-01 · 3-12 · 3-13)은 모든 편을 **평일·휴일 시간표에 다 있는 편**으로 골라 참이다.
+   * 나머지 셋(4-11 · 4-12 · 5-04)은 그런 편으로 사슬이 안 이어져 평일 편으로 실었다 — 거짓이다.
+   * 4-11 은 고현터미널 → 지세포 22번(20번대 평일/휴일 분리), 4-12 · 5-04 는 포로수용소 100 · 110번 편이 평일에만 있다.
    */
-  @Test void 휴일에도_타는_코스는_일곱이다() throws Exception {
+  @Test void 휴일에도_타는_코스는_열이다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(jsonPath("$.courses[?(@.holidayService == true)].courseCode")
             .value(org.hamcrest.Matchers.containsInAnyOrder(
-                "3-01", "3-04", "3-05", "3-06", "4-01", "4-03", "3-11")));
+                "3-01", "3-04", "3-05", "3-06", "4-01", "4-03", "3-11", "6-01", "3-12", "3-13")));
   }
 
   /**
@@ -180,9 +235,11 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courses[*].courseCode")
             .value(org.hamcrest.Matchers.contains(
                 "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10",
-                "3-11",
+                "3-11", "3-12", "3-13",
                 "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10",
-                "5-01", "5-02", "5-03")))
+                "4-11", "4-12",
+                "5-01", "5-02", "5-03", "5-04",
+                "6-01")))
         .andExpect(jsonPath("$.courses[*].courseId")
             .value(org.hamcrest.Matchers.everyItem(
                 org.hamcrest.Matchers.greaterThan(3))));
@@ -364,6 +421,47 @@ class CourseApiTest {
 
   @Test void 코스상세_없는_코스는_404() throws Exception {
     mvc.perform(get("/api/courses/9999")).andExpect(status().isNotFound());
+  }
+
+  // ── 되짚기 (V37) ─────────────────────────────────────────────────────────
+  //
+  // 두 스팟 사이에 직행이 없으면 고현터미널을 한 번 거친다(코스당 한 번 — 코스재설계 §3).
+  // 구간 둘로 담는다: 「A → 고현터미널」 + 「고현터미널 → B」. 구간마다 버스 한 대라 환승 없음 규칙이 그대로다.
+  // 그래서 코스 상세 타임라인 **가운데에 고현터미널 줄**이 생긴다 — 클라가 이 두 구간의 null 과 이름으로 그린다.
+
+  /** 4-11: 학동 · 바람의언덕 · 해금강 → (고현터미널) → 조선해양문화관. 해금강에서 지세포로 가는 직행이 없다. */
+  @Test void 코스상세_되짚기_구간은_고현터미널로_갔다가_고현터미널에서_떠난다() throws Exception {
+    mvc.perform(get("/api/courses/125"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.courseCode").value("4-11"))
+        .andExpect(jsonPath("$.legs.length()").value(6))
+        .andExpect(jsonPath("$.legs[3].fromName").value("해금강"))
+        .andExpect(jsonPath("$.legs[3].toPoiId").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[3].toName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[3].mode").value("BUS"))
+        .andExpect(jsonPath("$.legs[4].fromPoiId").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[4].fromName").value("고현터미널"))
+        .andExpect(jsonPath("$.legs[4].toName").value("조선해양문화관"))
+        .andExpect(jsonPath("$.legs[4].mode").value("BUS"))
+        // 스팟은 넷이다 — 고현터미널은 스팟 줄이 아니다
+        .andExpect(jsonPath("$.stops.length()").value(4));
+  }
+
+  /**
+   * 되짚기 구간의 정류장 줄 — 고현터미널로 가는 구간에는 내리는 곳이 없고(터미널이 곧 정류장이다),
+   * 고현터미널에서 떠나는 구간에는 타는 곳이 없다. 첫 구간 · 마지막 구간과 같은 규칙이다.
+   */
+  @Test void 코스상세_되짚기_구간의_터미널쪽에는_정류장_줄이_없다() throws Exception {
+    mvc.perform(get("/api/courses/125"))
+        .andExpect(jsonPath("$.legs[3].alight").doesNotExist())
+        .andExpect(jsonPath("$.legs[4].board").doesNotExist());
+  }
+
+  /** 새 코스 여섯(+ 3-11)의 휴일 운행 — 카드가 「평일·휴일」이라고 말할 수 있는 코스만 참이다. */
+  @Test void 대표코스의_휴일운행_기대값() throws Exception {
+    mvc.perform(get("/api/courses?featured=true"))
+        .andExpect(jsonPath("$.courses[*].holidayService")
+            .value(org.hamcrest.Matchers.contains(false, true, true, true, true, false, false)));
   }
 
   // ── 배 구간 (V35) ────────────────────────────────────────────────────────
