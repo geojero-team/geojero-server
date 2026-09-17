@@ -715,10 +715,21 @@ class CourseApiTest {
         assertNotNull(route, where + ": 스팟 시간표에 그 노선이 없다");
         for (var other : wd.get("byRoute")) {
           assertTrue(other.get("count").asInt() <= route.get("count").asInt(), where + ": 더 잦은 노선이 있다 — " + other);
+          // 횟수가 같으면 빨리 닿는 쪽(durationMin), 그래도 같으면 노선 번호 순이다 — 계약의 동률 규칙(매미성 → 맹종죽 32 · 33번이 둘 다 5회 30분)
+          if (other == route || other.get("count").asInt() != route.get("count").asInt()) continue;
+          int byMin = Integer.compare(route.get("durationMin").asInt(), other.get("durationMin").asInt());
+          assertTrue(byMin < 0 || (byMin == 0 && route.get("routeNo").asText().compareTo(other.get("routeNo").asText()) < 0),
+              where + ": 횟수가 같은데 앞서는 노선이 있다 — " + other);
         }
         assertEquals(route.get("count").asInt(), svc.get("tripsWeekday").asInt(), where);
         assertEquals(route.get("durationMin").asInt(), svc.get("durationMin").asInt(), where);
         assertEquals(route.get("durationMinLow").asInt(), svc.get("durationMinLow").asInt(), where);
+        // 추정 — 그 노선 편 가운데 하나라도 앞뒤 정류장으로 감싼 시각이면 참(스팟 시간표 화면이 소요시간에 추정을 붙이는 규칙)
+        boolean est = false;
+        for (var dep : wd.get("departures")) {
+          if (svc.get("routeNo").asText().equals(dep.get("routeNo").asText()) && dep.get("estimated").asBoolean()) est = true;
+        }
+        assertEquals(est, svc.get("estimated").asBoolean(), where + ": estimated");
         var hRoute = routeOf(hd, svc.get("routeNo").asText());
         assertEquals(hRoute == null ? 0 : hRoute.get("count").asInt(), svc.get("tripsHoliday").asInt(), where);
         assertEquals("NO_SERVICE".equals(hd.get("emptyReason").asText(null)), leg.get("holidayNoBus").asBoolean(), where);
