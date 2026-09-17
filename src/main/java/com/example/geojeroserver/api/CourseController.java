@@ -84,7 +84,8 @@ public class CourseController {
   public record TripsPerDay(int weekday, int holiday) {}
 
   /**
-   * 거제시 공식 관광코스와의 대조(V37 official_courses). 카드 배지 「거제시 당일코스 · 6곳 중 4곳」의 근거다.
+   * 거제시 공식 관광코스와의 대조(V37 official_courses). 코스 상세 머리 한 줄 「거제시 추천 관광코스 「당일코스」 여섯 곳 중 네 곳」의 근거다.
+   * 카드 사진 위 배지는 2026-09-17 저녁부터 숫자 없이 「거제시 추천 관광코스」만 적는다(사용자 결정).
    *   name       원문 코스 이름(「당일코스」 · 「2일코스」)
    *   total      원문 장소 칸 수 — 다리(거제대교 · 거가대교)와 HTML 주석 안의 칸은 세지 않는다
    *   matched    그중 이 코스 스팟이 든 칸 수
@@ -228,8 +229,14 @@ public class CourseController {
       boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight,
       FerryRide ferry, LegService service, Boolean holidayNoBus) {}
 
+  /**
+   * featuredRank · badgeAxis · officialCourse 는 카드(CourseCard)와 같은 값 · 같은 모양이다 — 대표가 아닌 코스는 셋 다 null.
+   * 카드 사진 위 배지는 숫자 없는 이름(「거제시 추천 관광코스」)만 적고, 원문 코스 이름 · 몇 곳 중 몇 곳 · 원문 순서는
+   * 코스 상세 머리 한 줄이 이 officialCourse 로 적는다(2026-09-17 저녁 사용자 결정).
+   */
   public record CourseDetail(long courseId, String courseCode, String name, String summary,
       String title, String intro,
+      Integer featuredRank, String badgeAxis, OfficialCourse officialCourse,
       String theme, Integer spotCount, Integer nineScenicCount,
       String departAt, String returnAt, Integer totalMin, Integer approxTotalMin,
       String approxTotalText, int busMinTotal, String busTotalText,
@@ -417,7 +424,7 @@ public class CourseController {
         best.count(), holidayTrips), noBus);
   }
 
-  /** 목록 한 줄의 거제시 공식 코스 대조. 가리키는 코스가 없으면 null(V37 CHECK 가 OFFICIAL 축과 묶는다). */
+  /** 목록 한 줄 · 상세의 거제시 공식 코스 대조. 가리키는 코스가 없으면 null(V37 CHECK 가 OFFICIAL 축과 묶는다). */
   private static OfficialCourse officialCourse(Map<String, Object> c) {
     if (c.get("official_name") == null) return null;
     return new OfficialCourse((String) c.get("official_name"), (int) num(c.get("official_total")),
@@ -583,11 +590,16 @@ public class CourseController {
 
   @GetMapping("/api/courses/{courseId}")
   public CourseDetail course(@PathVariable long courseId) {
+    // 거제시 공식 코스는 목록(courses)과 같은 조인 · 같은 별칭으로 읽는다 — officialCourse(c) 를 그대로 쓰려고.
     var rows = jdbc.queryForList("""
-        SELECT course_id, course_code, course_name, summary, title, intro, theme, spot_count,
-               nine_scenic_count, depart_time, return_time, total_min, approx_total_min,
-               service, base_date, origin_stop
-        FROM courses WHERE course_id = ? AND enabled""", courseId);
+        SELECT c.course_id, c.course_code, c.course_name, c.summary, c.title, c.intro, c.theme, c.spot_count,
+               c.nine_scenic_count, c.depart_time, c.return_time, c.total_min, c.approx_total_min,
+               c.service, c.base_date, c.origin_stop,
+               c.featured_rank, c.badge_axis, c.official_matched, c.official_order_kept,
+               o.name AS official_name, o.place_count AS official_total, o.source_url AS official_source_url
+        FROM courses c
+        LEFT JOIN official_courses o ON o.official_code = c.official_code
+        WHERE c.course_id = ? AND c.enabled""", courseId);
     if (rows.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "알 수 없는 코스");
     }
@@ -677,7 +689,9 @@ public class CourseController {
         .map(x -> new LegName(x.fromName(), x.toName())).toList();
     return new CourseDetail(courseId, (String) c.get("course_code"),
         (String) c.get("course_name"), (String) c.get("summary"),
-        (String) c.get("title"), (String) c.get("intro"), (String) c.get("theme"),
+        (String) c.get("title"), (String) c.get("intro"),
+        (Integer) c.get("featured_rank"), (String) c.get("badge_axis"), officialCourse(c),
+        (String) c.get("theme"),
         (Integer) c.get("spot_count"), (Integer) c.get("nine_scenic_count"),
         hm(c.get("depart_time")), hm(c.get("return_time")),
         (Integer) c.get("total_min"), approx,

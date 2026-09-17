@@ -452,6 +452,36 @@ class CourseApiTest {
         .andExpect(jsonPath("$.title").value(org.hamcrest.Matchers.nullValue()));
   }
 
+  /**
+   * 코스 상세도 카드와 **같은 모양**으로 대표 순서 · 성격 축 · 거제시 공식 코스 대조를 받는다(2026-09-17 저녁 사용자 결정).
+   * 카드 사진 위 배지에서 숫자를 뺐다(「거제시 추천 관광코스」 고정) — 「당일코스 여섯 곳 중 네 곳 · 원문 순서대로」는
+   * 코스 상세 머리 한 줄이 말하므로 그 근거가 상세 응답에 있어야 한다.
+   */
+  @Test void 코스상세에_성격축과_거제시_공식코스_대조가_실린다() throws Exception {
+    mvc.perform(get("/api/courses/125"))
+        .andExpect(jsonPath("$.courseCode").value("4-11"))
+        .andExpect(jsonPath("$.featuredRank").value(1))
+        .andExpect(jsonPath("$.badgeAxis").value("OFFICIAL"))
+        .andExpect(jsonPath("$.officialCourse.name").value("당일코스"))
+        .andExpect(jsonPath("$.officialCourse.total").value(6))
+        .andExpect(jsonPath("$.officialCourse.matched").value(4))
+        .andExpect(jsonPath("$.officialCourse.orderKept").value(true))
+        .andExpect(jsonPath("$.officialCourse.sourceUrl")
+            .value("https://tour.geoje.go.kr/index.geoje?menuCd=DOM_000008502008002000"));
+    // 다른 축의 대표 코스는 공식 코스가 없다
+    mvc.perform(get("/api/courses/127"))
+        .andExpect(jsonPath("$.courseCode").value("3-12"))
+        .andExpect(jsonPath("$.featuredRank").value(3))
+        .andExpect(jsonPath("$.badgeAxis").value("THEME"))
+        .andExpect(jsonPath("$.officialCourse").value(org.hamcrest.Matchers.nullValue()));
+    // 대표가 아닌 코스는 셋 다 null — 카드와 같다
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.courseCode").value("3-01"))
+        .andExpect(jsonPath("$.featuredRank").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.badgeAxis").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.officialCourse").value(org.hamcrest.Matchers.nullValue()));
+  }
+
   /** 검증 코스도 조회는 된다(saved_trips가 가리킬 수 있다). 단 구간이 없다. */
   @Test void 코스상세_검증코스는_구간이_없다() throws Exception {
     mvc.perform(get("/api/courses/1"))
