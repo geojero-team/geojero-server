@@ -41,6 +41,12 @@ import org.springframework.web.server.ResponseStatusException;
  * 2026-09-17 코스 재설계 2차 세트(V37): 대표 코스는 **사람이 고른 일곱**이고 순서는 {@code featured_rank} 다.
  * 옛 규칙(9경 많은 순 · 버스 짧은 순)은 버렸다 — 카드 배지가 전부 「거제 9경 · N경」이라 코스마다 무엇이 다른지
  * 화면이 말하지 않았다. 카드마다 어느 성격 축으로 골랐는지(badgeAxis)와 거제시 공식 코스 대조(officialCourse)가 붙는다.
+ *
+ * 2026-09-17 오후(사용자 결정): 코스는 **순서 + 구간마다 버스**만 제시하고 몇 시에 가서 며칠에 나눠 돌지는 사용자가 정한다.
+ * 코스에 저장된 편 사슬(course_legs 시각 · course_rides)은 「이 순서가 버스로 이어지는가」를 확인하려고 고른 하루짜리 한 편씩이다 —
+ * 그 편의 노선을 화면에 적으면 하루 한 번 오는 버스(55-1번)를 기다리게 된다. 그래서 BUS 구간마다 **그 구간을 가장 자주 다니는
+ * 직행 노선 + 하루 운행 횟수**(legs[].service)와 휴일에 그 구간 버스가 정말로 없는지(holidayNoBus)를 따로 준다.
+ * 사슬은 저장 · 확인용으로 그대로 남는다.
  */
 @RestController
 public class CourseController {
@@ -48,6 +54,8 @@ public class CourseController {
   private static final String SOURCE = "거제시 BIS 원문";
   /** 모든 코스의 출발·복귀 지점. 기획 결정으로 고현터미널 고정(기준문서 §6). */
   private static final String ORIGIN_NAME = "고현터미널";
+  /** 고현터미널의 시간표 정류장 이름 — 스팟 시간표(SpotTimetableController)가 쓰는 것과 같다. */
+  private static final String ORIGIN_STOP = "고현";
   private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
   private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
@@ -105,6 +113,13 @@ public class CourseController {
    *   badgeAxis         — 어느 성격 축으로 골랐나: OFFICIAL 거제시 공식 코스 · THEME 분류 · NINE 거제 9경.
    *                       분류 구성은 spots[].theme, 9경은 nineScenicNos, 배는 ferryMinTotal 로 화면이 센다
    *   officialCourse    — badgeAxis 가 OFFICIAL 일 때만(위 OfficialCourse)
+   *
+   * 2026-09-17 오후 — 구간 대표 노선(클래스 주석):
+   *   busMinTotal       — **BUS 구간 legs[].service.durationMin 의 합**이다. 코스 상세 구간 줄의 분을 더하면 이 숫자다.
+   *                       전에는 저장된 편 사슬의 분(course_legs.duration_min)이었다
+   *   holidayNoBusLegs  — 휴일에 그 구간 버스가 정말로 없는(holidayNoBus) 구간, 방문 순서. 없으면 []. 화면의 옛 「평일만 / 평일·휴일」
+   *                       태그를 대신한다 — holidayService 는 사슬이 우연히 탄 한 편이 휴일에 있는가라 「휴일엔 못 가는 코스」로 읽혔다
+   *   holidayService · tripsPerDay 는 옛 클라 호환으로 남긴다(화면이 더 쓰지 않는다)
    */
   public record CourseCard(long courseId, String courseCode, int spotCount, int rank,
       int nineScenicCount, String name, String summary,
@@ -115,7 +130,31 @@ public class CourseController {
       String departAt, String returnAt, int approxTotalMin, String approxTotalText,
       int busMinTotal, String busTotalText,
       int ferryMinTotal, String ferryTotalText,
+      List<LegName> holidayNoBusLegs,
       List<SpotBrief> spots) {}
+
+  /** 휴일에 버스가 없는 구간 하나 — 카드 태그 「휴일엔 버스 없는 구간이 있어요」의 근거. 고현터미널은 이름 그대로 온다. */
+  public record LegName(String fromName, String toName) {}
+
+  /**
+   * 한 BUS 구간을 **가장 자주 다니는 직행 노선**(같은 노선 · 같은 방향 한 편, 환승 없음)과 그 하루 횟수.
+   *
+   * 스팟 시간표(/api/pois/{id}/departures)와 같은 엔진 · 같은 스팟 계층 · 같은 byRoute 로 센다 — 「시간표 ›」와 숫자가 같아야 한다.
+   *   routeNo        평일에 가장 편이 많은 노선. 같으면 durationMin 짧은 쪽, 그래도 같으면 노선 번호 순
+   *   durationMin    그 노선 소요의 늦게 닿는 쪽(최댓값) — byRoute.durationMin 과 같은 규칙. 몇 시 편을 탈지는 사용자가 정한다
+   *   durationMinLow 가장 빠른 값(같으면 durationMin 과 같다)
+   *   estimated      그 노선 편 가운데 하나라도 앞뒤 정류장으로 감싼 시각인가(스팟 시간표 화면이 소요시간에 추정을 붙이는 규칙과 같다)
+   *   tripsWeekday   그 노선이 평일에 이 구간을 잇는 편 수
+   *   tripsHoliday   휴일 편 수(0 가능)
+   */
+  public record LegService(String routeNo, int durationMin, int durationMinLow, boolean estimated,
+      int tripsWeekday, int tripsHoliday) {}
+
+  /**
+   * 구간 하나의 계산 결과 — 대표 노선(평일에 시각 있는 편이 없으면 null)과 휴일 운행 없음.
+   * holidayNoBus 는 휴일 편이 어느 노선으로도 없고 **그게 시각 미상이 아닐 때만** 참이다(운행 없음 ≠ 시각 미상 — 절대규칙 3).
+   */
+  record LegCalc(LegService service, boolean holidayNoBus) {}
 
   public record CoursesRes(Map<String, Integer> counts, List<CourseCard> courses) {}
 
@@ -123,8 +162,13 @@ public class CourseController {
   private record RideRow(String routeNo, String boardStop, int boardMin,
       String alightStop, int alightMin) {}
 
-  /** 평일 스냅샷과 휴일 스냅샷 한 쌍. 하루 회차 수·휴일 운행이 여기서 나온다. */
-  private record Days(Snapshot weekday, Snapshot holiday) {}
+  /**
+   * 평일 스냅샷과 휴일 스냅샷 한 쌍. 하루 회차 수·휴일 운행 · 구간 대표 노선이 여기서 나온다.
+   * weekdayRides · holidayRides 는 경로 문장을 한 번만 읽어 둔 것이고, legs 는 (타는 정류장>내리는 정류장) → 계산 결과 캐시다.
+   * 스냅샷이 같은 동안(SnapshotService 가 같은 객체를 주는 동안) 답이 같으므로 스냅샷이 바뀔 때 통째로 버린다.
+   */
+  private record Days(Snapshot weekday, Snapshot holiday,
+      SpotLayer.Prepared weekdayRides, SpotLayer.Prepared holidayRides, Map<String, LegCalc> legs) {}
 
   /** 코스 상세의 스팟 한 곳 — 체류 시각이 붙는다. */
   public record CourseStop(int seq, long poiId, String name, String shortName,
@@ -173,11 +217,16 @@ public class CourseController {
   public record FerryRide(String legendLabel, String courseName, String totalText,
       Integer stayMin, boolean landsOnOedo, String dockName, String bookingUrl) {}
 
+  /**
+   * {@code service} · {@code holidayNoBus} 는 BUS 구간에만 있다(FERRY · SAME_STOP 은 둘 다 null) — LegService · LegCalc 주석.
+   * {@code board} · {@code alight} 는 **service.routeNo 의 정류장**이다 — 구간 줄이 적는 노선을 기다릴 곳이라서.
+   * 대표 노선이 없으면(옛 폴백) 탄 편의 노선으로 찾는다.
+   */
   public record Leg(int seq, String mode, Long fromPoiId, String fromName,
       Long toPoiId, String toName, String departAt, String arriveAt,
       int durationMin, int transfers, int transferWaitMin,
       boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight,
-      FerryRide ferry) {}
+      FerryRide ferry, LegService service, Boolean holidayNoBus) {}
 
   public record CourseDetail(long courseId, String courseCode, String name, String summary,
       String title, String intro,
@@ -185,6 +234,7 @@ public class CourseController {
       String departAt, String returnAt, Integer totalMin, Integer approxTotalMin,
       String approxTotalText, int busMinTotal, String busTotalText,
       int ferryMinTotal, String ferryTotalText,
+      List<LegName> holidayNoBusLegs,
       int legCount, int estimatedLegCount,
       String service, String baseDate, String source,
       String originName, String originStop,
@@ -192,6 +242,8 @@ public class CourseController {
 
   private final JdbcTemplate jdbc;
   private final SnapshotService snapshots;
+  /** 마지막으로 쓴 평일 · 휴일 한 쌍과 그 구간 계산 캐시. 스냅샷이 바뀌면 새로 만든다(weekdayAndHoliday). */
+  private volatile Days days;
 
   public CourseController(JdbcTemplate jdbc, SnapshotService snapshots) {
     this.jdbc = jdbc;
@@ -233,20 +285,21 @@ public class CourseController {
         + (featuredOnly ? " ORDER BY c.featured_rank" : " ORDER BY c.spot_count, c.rank_no");
     var rows = spotCount == null ? jdbc.queryForList(sql) : jdbc.queryForList(sql, spotCount);
 
-    // 구간 이동시간 합을 한 번에 받아 둔다 — 카드마다 물으면 코스 수만큼 쿼리가 늘어난다.
-    var busMin = busMinByCourse();
+    // 구간을 한 번에 받아 둔다 — 카드마다 물으면 코스 수만큼 쿼리가 늘어난다.
     var ferryMin = ferryMinByCourse();
+    var days = weekdayAndHoliday();
+    var legSums = legSumsByCourse(days);
 
-    // 노선·9경 번호도 한 번에 받아 course_id 로 묶는다(busMinByCourse 와 같은 방식).
+    // 노선·9경 번호도 한 번에 받아 course_id 로 묶는다(legSumsByCourse 와 같은 방식).
     var rides = ridesByCourse();
     var nineNos = nineScenicNosByCourse();
-    var days = weekdayAndHoliday();
 
     var cards = new ArrayList<CourseCard>();
     for (var c : rows) {
       long id = num(c.get("course_id"));
       int approx = (int) num(c.get("approx_total_min"));
-      int bus = busMin.getOrDefault(id, 0);
+      var sums = legSums.getOrDefault(id, LegSums.EMPTY);
+      int bus = sums.busMin();
       var courseRides = rides.getOrDefault(id, List.of());
       var routes = busRoutes(courseRides);
       cards.add(new CourseCard(id, (String) c.get("course_code"),
@@ -262,9 +315,106 @@ public class CourseController {
           bus, approxText(bus),
           ferryMin.getOrDefault(id, 0),
           ferryMin.getOrDefault(id, 0) == 0 ? null : approxText(ferryMin.get(id)),
+          sums.holidayNoBusLegs(),
           spotBriefs(id)));
     }
     return new CoursesRes(counts, cards);
+  }
+
+  /** 코스 한 개의 버스 분 합(구간 대표 노선 기준)과 휴일에 버스 없는 구간들. */
+  private record LegSums(int busMin, List<LegName> holidayNoBusLegs) {
+    static final LegSums EMPTY = new LegSums(0, List.of());
+  }
+
+  /**
+   * course_id → 버스 분 합 · 휴일 버스 없는 구간. 구간이 없는 코스(§3 검증 코스)는 키가 없다.
+   *
+   * ★ **배를 버스로 세지 않는다.** 카드가 적는 「버스 약 N분」은 버스에 앉아 있는 분이고, 배 160분을 거기 더하면 거짓말이 된다.
+   * 같은 정류장 구간도 버스가 아니라 세지 않는다(0분이다). 코스 상세(course)가 legs 로 더하는 것과 같은 규칙이다.
+   */
+  private Map<Long, LegSums> legSumsByCourse(Days d) {
+    var bus = new LinkedHashMap<Long, Integer>();
+    var noBus = new LinkedHashMap<Long, List<LegName>>();
+    jdbc.query("""
+        SELECT l.course_id, l.mode, l.from_poi_id, l.to_poi_id, l.duration_min,
+               COALESCE(pf.short_name, pf.poi_name) AS from_name, COALESCE(pt.short_name, pt.poi_name) AS to_name,
+               pf.timetable_stop AS from_stop, pt.timetable_stop AS to_stop
+        FROM course_legs l
+        LEFT JOIN pois pf ON pf.poi_id = l.from_poi_id
+        LEFT JOIN pois pt ON pt.poi_id = l.to_poi_id
+        ORDER BY l.course_id, l.leg_seq""",
+        rs -> {
+          long id = rs.getLong("course_id");
+          bus.putIfAbsent(id, 0);
+          noBus.computeIfAbsent(id, k -> new ArrayList<>());
+          String mode = rs.getString("mode");
+          if (!"BUS".equals(mode)) return;
+          Long fromPoi = rs.getObject("from_poi_id", Long.class);
+          Long toPoi = rs.getObject("to_poi_id", Long.class);
+          var calc = legCalc(d, mode, fromPoi, rs.getString("from_stop"), toPoi, rs.getString("to_stop"));
+          bus.merge(id, busMinOf(calc, rs.getInt("duration_min")), Integer::sum);
+          if (calc != null && calc.holidayNoBus()) {
+            noBus.get(id).add(new LegName(fromPoi == null ? ORIGIN_NAME : rs.getString("from_name"),
+                toPoi == null ? ORIGIN_NAME : rs.getString("to_name")));
+          }
+        });
+    var out = new LinkedHashMap<Long, LegSums>();
+    for (var e : bus.entrySet()) out.put(e.getKey(), new LegSums(e.getValue(), List.copyOf(noBus.get(e.getKey()))));
+    return out;
+  }
+
+  /**
+   * 버스 구간 하나의 분 — 구간 줄이 적는 대표 노선의 늦게 닿는 분. 대표 노선이 없으면(평일에 시각 있는 편이 없다)
+   * 저장된 편 사슬의 분으로 채운다 — 지금 추천 코스 30개엔 그런 구간이 없다(CourseApiTest 가 지킨다).
+   */
+  private static int busMinOf(LegCalc calc, int storedMin) {
+    return calc != null && calc.service() != null ? calc.service().durationMin() : storedMin;
+  }
+
+  /**
+   * BUS 구간의 대표 노선 · 휴일 운행 없음. 버스가 아니면 null(배 · 같은 정류장 구간).
+   * 구간 끝이 NULL 이면 고현터미널이고, 스팟은 그 스팟의 시간표 정류장(pois.timetable_stop)으로 묻는다 — 스팟 시간표와 같은 정류장이다.
+   */
+  private LegCalc legCalc(Days d, String mode, Long fromPoi, String fromStop, Long toPoi, String toStop) {
+    if (!"BUS".equals(mode)) return null;
+    String from = fromPoi == null ? ORIGIN_STOP : fromStop;
+    String to = toPoi == null ? ORIGIN_STOP : toStop;
+    if (from == null || to == null) return null; // 격자에 정류장 칸이 없는 스팟 — 버스 구간에는 오지 않는다
+    return d.legs().computeIfAbsent(from + ">" + to,
+        k -> legService(d.weekdayRides(), d.holidayRides(), from, to));
+  }
+
+  /**
+   * ★ 구간을 가장 자주 다니는 직행 노선과 휴일 운행 없음 — 순수 계산(스냅샷 둘과 정류장 이름만 받는다).
+   *
+   * 스팟 시간표가 세는 그대로 센다: 스팟 계층(SpotLayer)의 승차 → SpotTimetableController.byRoute(노선별 횟수 · 소요 폭).
+   * 새로 세는 규칙을 두지 않는다 — 「시간표 ›」와 한 숫자라도 어긋나면 구간 줄이 거짓말을 한다.
+   *
+   * holidayNoBus — 휴일 승차가 어느 노선으로도 없고, 원문 격자에 「서지만 시각이 없는」 노선도 없을 때만 참이다.
+   * 스팟 시간표의 emptyReason 이 NO_SERVICE 인 것과 같은 말이다. 시각 미상(UNKNOWN_TIME)을 「버스 없음」이라 적으면
+   * 지도앱이 재난 운휴를 이유 없는 빈칸으로 그린 것과 같은 잘못이다(기준문서 §4 · 절대규칙 3).
+   */
+  static LegCalc legService(SpotLayer.Prepared weekday, SpotLayer.Prepared holiday, String from, String to) {
+    var wd = SpotLayer.rides(weekday, from, to);
+    var hd = SpotLayer.rides(holiday, from, to);
+    boolean noBus = hd.isEmpty() && Timetable.unknownTimeRoutes(holiday.snapshot(), from, to).isEmpty();
+    if (wd.isEmpty()) return new LegCalc(null, noBus);
+
+    var best = SpotTimetableController.byRoute(wd.stream().map(SpotTimetableController::departure).toList())
+        .stream()
+        .min(java.util.Comparator
+            .comparing(SpotTimetableController.RouteSummary::count, java.util.Comparator.reverseOrder())
+            .thenComparing(SpotTimetableController.RouteSummary::durationMin,
+                java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+            .thenComparing(SpotTimetableController.RouteSummary::routeNo))
+        .orElseThrow();
+    String route = best.routeNo();
+    int holidayTrips = SpotTimetableController.byRoute(hd.stream().map(SpotTimetableController::departure).toList())
+        .stream().filter(r -> r.routeNo().equals(route)).mapToInt(SpotTimetableController.RouteSummary::count)
+        .findFirst().orElse(0);
+    boolean estimated = wd.stream().anyMatch(r -> r.routeNo().equals(route) && r.estimated());
+    return new LegCalc(new LegService(route, best.durationMin(), best.durationMinLow(), estimated,
+        best.count(), holidayTrips), noBus);
   }
 
   /** 목록 한 줄의 거제시 공식 코스 대조. 가리키는 코스가 없으면 null(V37 CHECK 가 OFFICIAL 축과 묶는다). */
@@ -275,25 +425,11 @@ public class CourseController {
         (String) c.get("official_source_url"));
   }
 
-  /**
-   * course_id → 구간 이동시간 합(분). 구간이 없는 코스는 키가 없다.
-   *
-   * ★ **배를 버스로 세지 않는다.** 카드가 적는 「버스 약 N분」은 버스에 앉아 있는 분이고,
-   * 배 160분을 거기 더하면 거짓말이 된다. mode 로 갈라 센다(같은 정류장 구간은 0분이라 어느 쪽에도 안 는다).
-   */
-  private Map<Long, Integer> busMinByCourse() {
-    return legMinByMode("mode <> 'FERRY'");
-  }
-
-  /** course_id → 배 구간 시간 합(분). 배가 없는 코스는 키가 없다. */
+  /** course_id → 배 구간 시간 합(분). 배가 없는 코스는 키가 없다. 버스 분은 legSumsByCourse 가 따로 센다. */
   private Map<Long, Integer> ferryMinByCourse() {
-    return legMinByMode("mode = 'FERRY'");
-  }
-
-  private Map<Long, Integer> legMinByMode(String where) {
     var out = new LinkedHashMap<Long, Integer>();
     jdbc.query("SELECT course_id, COALESCE(sum(duration_min), 0) AS min_sum"
-        + " FROM course_legs WHERE " + where + " GROUP BY course_id",
+        + " FROM course_legs WHERE mode = 'FERRY' GROUP BY course_id",
         rs -> {
           out.put(rs.getLong("course_id"), rs.getInt("min_sum"));
         });
@@ -341,8 +477,15 @@ public class CourseController {
     Set<LocalDate> holidays = new HashSet<>(jdbc.query("SELECT holiday_date FROM holidays",
         (rs, i) -> rs.getObject("holiday_date", LocalDate.class)));
     LocalDate today = LocalDate.now(KST);
-    return new Days(snapshots.forDate(firstOf(DayClass.WEEKDAY, today, holidays).toString()),
-        snapshots.forDate(firstOf(DayClass.HOLIDAY, today, holidays).toString()));
+    var weekday = snapshots.forDate(firstOf(DayClass.WEEKDAY, today, holidays).toString());
+    var holiday = snapshots.forDate(firstOf(DayClass.HOLIDAY, today, holidays).toString());
+    // 스냅샷이 그대로면 구간 계산 캐시도 그대로다. 날이 바뀌거나 SnapshotService 가 다시 읽으면 새 객체라 새로 만든다.
+    var cached = days;
+    if (cached != null && cached.weekday() == weekday && cached.holiday() == holiday) return cached;
+    var fresh = new Days(weekday, holiday, SpotLayer.prepare(weekday), SpotLayer.prepare(holiday),
+        new java.util.concurrent.ConcurrentHashMap<>());
+    days = fresh;
+    return fresh;
   }
 
   private static LocalDate firstOf(DayClass want, LocalDate from, Set<LocalDate> holidays) {
@@ -414,7 +557,8 @@ public class CourseController {
   }
 
   /**
-   * 이 코스가 지나는 (출발, 가는 곳, 노선)마다 내리는 정류장. 구간마다 쿼리를 쏘지 않게 한 번에 받는다.
+   * 이 코스가 지나는 (출발, 가는 곳)의 노선마다 타는 · 내리는 정류장. 구간마다 쿼리를 쏘지 않게 한 번에 받는다.
+   * 노선을 거르지 않는다 — 구간 줄이 적는 노선(대표 노선)은 코스가 탄 편의 노선과 다를 수 있다(2026-09-17).
    * 표에 그 조합이 없으면 그냥 없다 — 가까운 정류장을 추측으로 고르지 않는다(절대규칙 1).
    */
   private Map<String, StopPair> stopsOf(long courseId, Long terminal) {
@@ -424,11 +568,10 @@ public class CourseController {
                b.stop_name, b.distance_m, b.alight_stop_name, b.alight_distance_m
         FROM boarding_stops b
         WHERE b.status = 'RESOLVED'
-          AND EXISTS (SELECT 1 FROM course_legs l JOIN course_rides r ON r.leg_id = l.leg_id
+          AND EXISTS (SELECT 1 FROM course_legs l
                       WHERE l.course_id = ?
                         AND COALESCE(l.from_poi_id, ?) = b.from_poi_id
-                        AND COALESCE(l.to_poi_id, ?) = b.to_poi_id
-                        AND r.route_no = b.route_no)""",
+                        AND COALESCE(l.to_poi_id, ?) = b.to_poi_id)""",
         rs -> {
           out.put(stopKey(rs.getLong("from_poi_id"), rs.getLong("to_poi_id"), rs.getString("route_no")),
               new StopPair(
@@ -464,6 +607,7 @@ public class CourseController {
 
     Long terminal = terminalPoiId();
     var stopPairs = stopsOf(courseId, terminal);
+    var days = weekdayAndHoliday();
 
     var legs = new ArrayList<Leg>();
     for (var l : jdbc.queryForList("""
@@ -471,6 +615,7 @@ public class CourseController {
                l.depart_time, l.arrive_time, l.duration_min, l.transfers, l.transfer_wait_min,
                COALESCE(pf.short_name, pf.poi_name) AS from_name,
                COALESCE(pt.short_name, pt.poi_name) AS to_name,
+               pf.timetable_stop AS from_stop, pt.timetable_stop AS to_stop,
                fc.legend_label, fc.course_name AS ferry_course_name, fc.total_text,
                fc.oedo_stay_min, fc.lands_on_oedo, fc.booking_url, fd.short_name AS dock_name
         FROM course_legs l
@@ -490,11 +635,17 @@ public class CourseController {
               rs.getBoolean("alight_estimated")),
           legId);
       boolean est = rides.stream().anyMatch(r -> r.boardEstimated() || r.alightEstimated());
-      // 노선은 **마지막으로 탄 버스**다. 환승은 코스에 없지만(기준문서 §6) 있어도 내리는 것은 마지막 버스다.
-      StopPair pair = rides.isEmpty() ? null
-          : stopPairs.get(stopKey(l.get("from_poi_id") == null ? terminal : num(l.get("from_poi_id")),
-              l.get("to_poi_id") == null ? terminal : num(l.get("to_poi_id")),
-              rides.get(rides.size() - 1).routeNo()));
+      String mode = (String) l.get("mode");
+      Long fromPoi = l.get("from_poi_id") == null ? null : num(l.get("from_poi_id"));
+      Long toPoi = l.get("to_poi_id") == null ? null : num(l.get("to_poi_id"));
+      var calc = legCalc(days, mode, fromPoi, (String) l.get("from_stop"), toPoi, (String) l.get("to_stop"));
+      LegService service = calc == null ? null : calc.service();
+      // 정류장 줄의 노선은 **구간 줄이 적는 노선**(대표 노선)이다 — 사용자가 기다릴 버스의 정류장이라서.
+      // 대표 노선이 없으면 옛 규칙대로 마지막으로 탄 버스다(환승은 코스에 없지만 있어도 내리는 것은 마지막 버스다).
+      String stopRoute = service != null ? service.routeNo()
+          : rides.isEmpty() ? null : rides.get(rides.size() - 1).routeNo();
+      StopPair pair = stopRoute == null ? null
+          : stopPairs.get(stopKey(fromPoi == null ? terminal : fromPoi, toPoi == null ? terminal : toPoi, stopRoute));
       // 내리는 곳은 가는 곳이 스팟일 때만, 타는 곳은 출발 쪽이 스팟일 때만 — 고현터미널은 그 자체가 정류장이라 0m 다.
       StopWalk alight = pair == null || l.get("to_poi_id") == null ? null : pair.alight();
       StopWalk board = pair == null || l.get("from_poi_id") == null ? null : pair.board();
@@ -506,21 +657,24 @@ public class CourseController {
               Boolean.TRUE.equals(l.get("lands_on_oedo")), (String) l.get("dock_name"),
               (String) l.get("booking_url"));
       legs.add(new Leg(
-          (int) num(l.get("leg_seq")), (String) l.get("mode"),
-          l.get("from_poi_id") == null ? null : num(l.get("from_poi_id")),
-          l.get("from_poi_id") == null ? ORIGIN_NAME : (String) l.get("from_name"),
-          l.get("to_poi_id") == null ? null : num(l.get("to_poi_id")),
-          l.get("to_poi_id") == null ? ORIGIN_NAME : (String) l.get("to_name"),
+          (int) num(l.get("leg_seq")), mode,
+          fromPoi, fromPoi == null ? ORIGIN_NAME : (String) l.get("from_name"),
+          toPoi, toPoi == null ? ORIGIN_NAME : (String) l.get("to_name"),
           hm(l.get("depart_time")), hm(l.get("arrive_time")),
           (int) num(l.get("duration_min")), (int) num(l.get("transfers")),
-          (int) num(l.get("transfer_wait_min")), est, rides, board, alight, ferry));
+          (int) num(l.get("transfer_wait_min")), est, rides, board, alight, ferry,
+          service, calc == null ? null : calc.holidayNoBus()));
     }
 
     Integer approx = (Integer) c.get("approx_total_min");
     // 구간 이동시간 합. 이미 만든 legs 를 더하므로 쿼리를 더 쏘지 않는다.
-    // ★ 배를 버스로 세지 않는다 — 카드의 「버스 약 N분」은 버스에 앉아 있는 분이다.
-    int busMin = legs.stream().filter(x -> !"FERRY".equals(x.mode())).mapToInt(Leg::durationMin).sum();
+    // ★ 버스 분은 구간 줄이 적는 분(대표 노선의 늦게 닿는 분)의 합이다 — 카드(legSumsByCourse)와 같은 규칙.
+    // 배 · 같은 정류장 구간은 버스가 아니라 세지 않는다.
+    int busMin = legs.stream().filter(x -> "BUS".equals(x.mode()))
+        .mapToInt(x -> x.service() != null ? x.service().durationMin() : x.durationMin()).sum();
     int ferryMin = legs.stream().filter(x -> "FERRY".equals(x.mode())).mapToInt(Leg::durationMin).sum();
+    var noBusLegs = legs.stream().filter(x -> Boolean.TRUE.equals(x.holidayNoBus()))
+        .map(x -> new LegName(x.fromName(), x.toName())).toList();
     return new CourseDetail(courseId, (String) c.get("course_code"),
         (String) c.get("course_name"), (String) c.get("summary"),
         (String) c.get("title"), (String) c.get("intro"), (String) c.get("theme"),
@@ -530,6 +684,7 @@ public class CourseController {
         approx == null ? null : approxText(approx),
         busMin, approxText(busMin),
         ferryMin, ferryMin == 0 ? null : approxText(ferryMin),
+        noBusLegs,
         legs.size(), (int) legs.stream().filter(Leg::estimated).count(),
         (String) c.get("service"),
         c.get("base_date") == null ? null : c.get("base_date").toString(),

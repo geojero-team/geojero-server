@@ -129,4 +129,20 @@ class SpotLayerTest {
     var s = snap(trip("55", "고현=06:25", "학동=07:05", "해금강=07:15"));
     assertTrue(Timetable.rides(s, "학동", "도장포").isEmpty());
   }
+
+  /**
+   * 코스 목록은 한 날짜에 구간 수십 개를 묻는다(2026-09-17 — 구간마다 가장 자주 다니는 노선).
+   * 경로 문장을 한 번만 읽어 둔 것(prepare)으로 물어도 **같은 답**이어야 한다 — 규칙이 둘로 갈라지면 안 된다.
+   */
+  @Test void 미리_읽어둔_회차로_물어도_같은_답이다() {
+    var s = snap(trip("55", "고현=06:25", "학동=07:05", "해금강=07:15"),
+        trip("55", "해금강=07:35", "학동=07:47", "고현=08:30"),
+        trip("32", "#연사-국도14호-송정-대계(6:00)-외포-두모실-고현행", "두모실=06:10"));
+    var prepared = SpotLayer.prepare(s);
+    for (String[] pair : new String[][] {{"학동", "도장포"}, {"도장포", "고현"}, {"대계", "두모실"}, {"고현", "해금강"}}) {
+      assertEquals(SpotLayer.rides(s, pair[0], pair[1]), SpotLayer.rides(prepared, pair[0], pair[1]),
+          pair[0] + " → " + pair[1]);
+    }
+    assertSame(s, prepared.snapshot(), "시각 미상 갈래(Timetable)는 같은 스냅샷을 읽어야 한다");
+  }
 }

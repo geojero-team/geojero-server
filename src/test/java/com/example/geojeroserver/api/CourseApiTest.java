@@ -2,6 +2,7 @@ package com.example.geojeroserver.api;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,11 +48,13 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courses[0].departAt").value("11:05"))
         .andExpect(jsonPath("$.courses[0].returnAt").value("19:40"))
         .andExpect(jsonPath("$.courses[0].approxTotalText").value("약 8시간 30분"))
-        // ★ 화면이 실제로 적는 것은 이쪽이다 — 구간 이동시간의 합(40+10+12+52=114분).
-        // approxTotalMin(510분)에서 버스는 114분뿐이고 나머지는 머무는 시간이다(합 401분).
+        // ★ 화면이 실제로 적는 것은 이쪽이다 — 구간 이동시간의 합.
+        // approxTotalMin(510분)에서 버스는 두 시간이 안 되고 나머지는 머무는 시간이다.
         // 얼마나 머무는지는 사용자가 정하므로 2026-09-13에 화면에서 뺐다 — 필드는 남긴다.
-        .andExpect(jsonPath("$.courses[0].busMinTotal").value(114))
-        .andExpect(jsonPath("$.courses[0].busTotalText").value("약 1시간 54분"))
+        // 2026-09-17 부터 구간 줄이 적는 대표 노선(service)의 늦게 닿는 분을 더한다 — 55번 40 + 10 + 12 + 55 = 117분.
+        // 전에는 코스가 탄 편의 분(40 + 10 + 12 + 52 = 114)이었다. 몇 시 편을 탈지는 사용자가 정하므로 어느 편이든 늦는 쪽이다.
+        .andExpect(jsonPath("$.courses[0].busMinTotal").value(117))
+        .andExpect(jsonPath("$.courses[0].busTotalText").value("약 1시간 57분"))
         // 카드의 원형 썸네일 3개 — poiId로 사진을 받고 shortName을 라벨로 쓴다
         .andExpect(jsonPath("$.courses[0].spots.length()").value(3))
         .andExpect(jsonPath("$.courses[0].spots[0].seq").value(1))
@@ -131,7 +134,7 @@ class CourseApiTest {
                 "풍차 언덕과 바위섬, 돌로 쌓은 성",
                 "유리 돔 식물원에서 매미성 지나 맹종죽 숲까지",
                 "배로 건너가는 거제 9경, 외도보타니아",
-                "포로수용소 유적에서 바다의 금강산까지",
+                "풍차 언덕에서 6·25 포로수용소 유적까지",
                 "매미성에서 옛 관아 지나 포로수용소 유적까지")));
   }
 
@@ -223,8 +226,7 @@ class CourseApiTest {
    *
    * V37 새 코스 여섯 중 셋(6-01 · 3-12 · 3-13)은 모든 편을 **평일·휴일 시간표에 다 있는 편**으로 골라 참이다.
    * 나머지 셋(4-11 · 4-12 · 5-04)은 그런 편으로 사슬이 안 이어져 평일 편으로 실었다 — 거짓이다.
-   * 4-11 은 고현터미널 → 지세포 22번(20번대 평일/휴일 분리), 4-12 · 5-04 는 포로수용소 100 · 110번 편이 평일에만 있다
-   * (4-12 는 포로수용소를 맨 앞에 둬도 그렇다 — 포로수용소 → 고현터미널 평일 · 휴일 공통 편이 08:25 뒤로 14:15 까지 없다).
+   * 4-11 은 고현터미널 → 지세포 22번(20번대 평일/휴일 분리), 4-12 · 5-04 는 포로수용소 100 · 110번 편이 평일에만 있다.
    */
   @Test void 휴일에도_타는_코스는_열이다() throws Exception {
     mvc.perform(get("/api/courses"))
@@ -273,8 +275,8 @@ class CourseApiTest {
         .andExpect(jsonPath("$.courseCode").value("3-01"))
         .andExpect(jsonPath("$.spotCount").value(3))
         .andExpect(jsonPath("$.approxTotalText").value("약 8시간 30분"))
-        .andExpect(jsonPath("$.busMinTotal").value(114))     // legs 합과 같아야 한다
-        .andExpect(jsonPath("$.busTotalText").value("약 1시간 54분"))
+        .andExpect(jsonPath("$.busMinTotal").value(117))     // legs[].service.durationMin 합과 같아야 한다
+        .andExpect(jsonPath("$.busTotalText").value("약 1시간 57분"))
         .andExpect(jsonPath("$.legCount").value(4))      // "· 4구간"
         .andExpect(jsonPath("$.originName").value("고현터미널"))
         .andExpect(jsonPath("$.service").value("WEEKDAY")) // 헤더 '평일' 칩
@@ -320,14 +322,20 @@ class CourseApiTest {
         .andExpect(jsonPath("$.legs[3].board.distanceM").value(376));
   }
 
-  @Test void 코스상세_돌아갈_때_타는_곳이_내린_곳과_다를_수_있다() throws Exception {
-    // 학동몽돌해변으로 끝나는 코스 셋(3-04 · 4-03 · 4-04)은 67-1 로 「학동삼거리」(106m)에 내리고
-    // 돌아갈 때는 55번을 「학동」(311m)에서 탄다 — 다른 정류장이고 3배 멀다.
+  /**
+   * 정류장 줄은 **구간 줄이 적는 노선**(service)의 정류장이다 — 코스가 탄 편의 노선이 아니다(2026-09-17).
+   * 학동몽돌해변 → 고현터미널은 코스 4-03 이 55번 편을 탔지만 구간을 가장 자주 다니는 것은 67-1번(하루 8회 · 55번 6회)이라
+   * 구간 줄은 「67-1번」이고, 타는 곳도 67-1번이 서는 「학동삼거리」(106m)다. 55번의 「학동」(311m)을 적으면
+   * 67-1번을 기다릴 사람이 다른 정류장에 선다.
+   */
+  @Test void 코스상세_정류장_줄은_구간_줄의_노선을_따른다() throws Exception {
     mvc.perform(get("/api/courses/115"))
         .andExpect(jsonPath("$.legs[3].alight.stop").value("학동삼거리"))
         .andExpect(jsonPath("$.legs[4].toName").value("고현터미널"))
-        .andExpect(jsonPath("$.legs[4].board.stop").value("학동"))
-        .andExpect(jsonPath("$.legs[4].board.distanceM").value(311));
+        .andExpect(jsonPath("$.legs[4].rides[0].routeNo").value("55"))
+        .andExpect(jsonPath("$.legs[4].service.routeNo").value("67-1"))
+        .andExpect(jsonPath("$.legs[4].board.stop").value("학동삼거리"))
+        .andExpect(jsonPath("$.legs[4].board.distanceM").value(106));
   }
 
   @Test void 코스상세_고현터미널에서_떠나는_첫_구간에는_타는_곳이_없다() throws Exception {
@@ -477,7 +485,10 @@ class CourseApiTest {
         .andExpect(jsonPath("$.legs[4].board").doesNotExist());
   }
 
-  /** 새 코스 여섯(+ 3-11)의 휴일 운행 — 카드가 「평일·휴일」이라고 말할 수 있는 코스만 참이다. */
+  /**
+   * 새 코스 여섯(+ 3-11)의 휴일 운행 — 코스가 탄 편이 전부 휴일에도 있는가. 화면은 2026-09-17 부터 이 값을 쓰지 않는다
+   * (구간마다 holidayNoBus 로 바꿨다 — 아래 「휴일」 절). 옛 클라가 읽을 수 있어 응답에 남긴다.
+   */
   @Test void 대표코스의_휴일운행_기대값() throws Exception {
     mvc.perform(get("/api/courses?featured=true"))
         .andExpect(jsonPath("$.courses[*].holidayService")
@@ -543,12 +554,12 @@ class CourseApiTest {
 
   /**
    * ★ 배 분을 버스로 세면 카드의 「버스 약 N분」이 거짓말이 된다.
-   * 버스 102분(50 + 52) 과 배 160분을 갈라 센다. 같은 정류장 구간은 0분이라 양쪽 다 영향이 없다.
+   * 버스 105분(55번 50 + 55 — 구간 대표 노선의 늦게 닿는 분) 과 배 160분을 갈라 센다. 같은 정류장 구간은 버스가 아니라 세지 않는다.
    */
   @Test void 코스상세_버스_시간과_배_시간을_갈라_센다() throws Exception {
     mvc.perform(get("/api/courses/124"))
-        .andExpect(jsonPath("$.busMinTotal").value(102))
-        .andExpect(jsonPath("$.busTotalText").value("약 1시간 42분"))
+        .andExpect(jsonPath("$.busMinTotal").value(105))
+        .andExpect(jsonPath("$.busTotalText").value("약 1시간 45분"))
         .andExpect(jsonPath("$.ferryMinTotal").value(160))
         .andExpect(jsonPath("$.ferryTotalText").value("약 2시간 40분"));
   }
@@ -556,7 +567,7 @@ class CourseApiTest {
   /** 코스 목록 카드도 같이 갈라 받는다 — 카드에 두 값을 나란히 적는다. */
   @Test void 코스목록_카드도_배_시간을_따로_받는다() throws Exception {
     mvc.perform(get("/api/courses"))
-        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].busMinTotal").value(102))
+        .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].busMinTotal").value(105))
         .andExpect(jsonPath("$.courses[?(@.courseCode == '3-11')].ferryMinTotal").value(160));
   }
 
@@ -590,5 +601,194 @@ class CourseApiTest {
     mvc.perform(get("/api/courses/101"))
         .andExpect(jsonPath("$.ferryMinTotal").value(0))
         .andExpect(jsonPath("$.ferryTotalText").doesNotExist());
+  }
+
+  // ── 구간 대표 노선 · 휴일 (2026-09-17 사용자 결정) ─────────────────────────────
+  //
+  // 코스는 **순서 + 구간마다 버스**만 제시하고 몇 시에 갈지는 사용자가 정한다. 코스에 저장된 편 사슬(rides · 시각)은
+  // 「이 순서가 버스로 이어지는가」를 확인하려고 고른 하루짜리 한 편씩이라, 그 노선을 화면에 적으면 하루 한 번 오는 버스를
+  // 기다리게 된다. 그래서 BUS 구간마다 **그 구간을 가장 자주 다니는 직행 노선 + 하루 운행 횟수**(service)를 준다.
+  // 계산은 스팟 시간표와 같은 엔진 · 같은 스팟 계층이다 — 「시간표 ›」와 숫자가 어긋나면 안 된다(아래 대조 테스트).
+
+  /**
+   * 3-12(③)가 탄 고현터미널 → 매미성 편은 32-2번(하루 1회)이다 — 구간 줄은 33번 하루 9회를 적는다.
+   * 4-11(①)의 고현터미널 → 조선해양문화관은 22번 편을 탔지만 23번이 평일 11회 · 휴일 6회로 가장 잦다(20번대 평일/휴일 분리).
+   * 기존 필드(rides · durationMin · departAt)는 그대로 남는다 — 저장 · 확인용이다.
+   */
+  @Test void 코스상세_버스_구간마다_가장_자주_다니는_노선과_하루_횟수가_있다() throws Exception {
+    mvc.perform(get("/api/courses/127"))
+        .andExpect(jsonPath("$.courseCode").value("3-12"))
+        .andExpect(jsonPath("$.legs[3].toName").value("매미성"))
+        .andExpect(jsonPath("$.legs[3].rides[0].routeNo").value("32-2"))
+        .andExpect(jsonPath("$.legs[3].durationMin").value(45))
+        .andExpect(jsonPath("$.legs[3].departAt").value("16:02"))
+        .andExpect(jsonPath("$.legs[3].service.routeNo").value("33"))
+        .andExpect(jsonPath("$.legs[3].service.durationMin").value(52))
+        .andExpect(jsonPath("$.legs[3].service.durationMinLow").value(45))
+        .andExpect(jsonPath("$.legs[3].service.estimated").value(true))
+        .andExpect(jsonPath("$.legs[3].service.tripsWeekday").value(9))
+        .andExpect(jsonPath("$.legs[3].service.tripsHoliday").value(9))
+        .andExpect(jsonPath("$.legs[3].holidayNoBus").value(false));
+    mvc.perform(get("/api/courses/125"))
+        .andExpect(jsonPath("$.legs[4].toName").value("조선해양문화관"))
+        .andExpect(jsonPath("$.legs[4].rides[0].routeNo").value("22"))
+        .andExpect(jsonPath("$.legs[4].service.routeNo").value("23"))
+        .andExpect(jsonPath("$.legs[4].service.durationMin").value(44))
+        .andExpect(jsonPath("$.legs[4].service.durationMinLow").value(44))
+        .andExpect(jsonPath("$.legs[4].service.estimated").value(false))
+        .andExpect(jsonPath("$.legs[4].service.tripsWeekday").value(11))
+        .andExpect(jsonPath("$.legs[4].service.tripsHoliday").value(6))
+        // 고현터미널 → 학동은 55번 6회 · 67-1번 6회로 같아 빨리 닿는 55번(40분)이다
+        .andExpect(jsonPath("$.legs[0].service.routeNo").value("55"))
+        .andExpect(jsonPath("$.legs[0].service.durationMin").value(40))
+        .andExpect(jsonPath("$.legs[0].service.tripsWeekday").value(6));
+  }
+
+  /** 배 · 같은 정류장 구간은 버스가 아니라 대표 노선도 휴일 판단도 없다 — 둘 다 null 이다(필드는 빠지지 않는다). */
+  @Test void 코스상세_배와_같은정류장_구간에는_대표노선이_없다() throws Exception {
+    mvc.perform(get("/api/courses/124"))
+        .andExpect(jsonPath("$.legs[1].mode").value("FERRY"))
+        .andExpect(jsonPath("$.legs[1].service").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[1].holidayNoBus").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[3].mode").value("SAME_STOP"))
+        .andExpect(jsonPath("$.legs[3].service").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[3].holidayNoBus").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.legs[0].mode").value("BUS"))
+        .andExpect(jsonPath("$.legs[0].service.routeNo").value("55"))
+        .andExpect(jsonPath("$.legs[0].holidayNoBus").value(false));
+  }
+
+  /**
+   * ★ 추천 코스 30개의 모든 버스 구간 — 대표 노선이 있고(없으면 저장된 분으로 채우게 되는데 그런 구간이 생기면 여기서 드러난다),
+   * 카드와 상세의 busMinTotal 이 **구간 줄의 분(service.durationMin)을 더한 값**이다(코스 상세 구간 줄의 분을 더하면 카드 숫자와 같아야 한다).
+   * holidayNoBusLegs 는 holidayNoBus 인 버스 구간을 방문 순서대로 모은 것이다 — 지금 30개 중엔 없다(휴일에 이 구간을 잇는 노선이 하나도 없는 구간이 없다).
+   */
+  @Test void 모든_추천코스의_버스분은_구간_대표노선_분의_합이고_휴일_없는_구간이_모인다() throws Exception {
+    var cards = json(mvc.perform(get("/api/courses")).andReturn()).get("courses");
+    assertEquals(30, cards.size());
+    for (var card : cards) {
+      String code = card.get("courseCode").asText();
+      var detail = json(mvc.perform(get("/api/courses/" + card.get("courseId").asLong())).andReturn());
+      int sum = 0;
+      var noBus = new java.util.ArrayList<String>();
+      for (var leg : detail.get("legs")) {
+        String where = code + " 구간" + leg.get("seq").asInt() + " " + leg.get("mode").asText();
+        if (!"BUS".equals(leg.get("mode").asText())) {
+          assertTrue(leg.get("service").isNull(), where + ": 버스가 아닌데 대표 노선이 있다");
+          assertTrue(leg.get("holidayNoBus").isNull(), where);
+          continue;
+        }
+        assertFalse(leg.get("service").isNull(), where + ": 대표 노선이 없다 — 저장된 분으로 채웠다(보고할 것)");
+        sum += leg.get("service").get("durationMin").asInt();
+        if (leg.get("holidayNoBus").asBoolean()) {
+          noBus.add(leg.get("fromName").asText() + ">" + leg.get("toName").asText());
+        }
+      }
+      assertEquals(sum, detail.get("busMinTotal").asInt(), code + ": 상세 busMinTotal 이 구간 줄 분의 합이 아니다");
+      assertEquals(sum, card.get("busMinTotal").asInt(), code + ": 카드 busMinTotal 이 상세와 다르다");
+      assertEquals(noBus, names(detail.get("holidayNoBusLegs")), code + ": 상세 holidayNoBusLegs");
+      assertEquals(noBus, names(card.get("holidayNoBusLegs")), code + ": 카드 holidayNoBusLegs");
+    }
+  }
+
+  /**
+   * ★ 구간 줄의 숫자는 그 스팟의 「시간표 ›」와 같아야 한다 — 같은 엔진 · 같은 스팟 계층 · 같은 날(오늘 이후 첫 평일 · 첫 휴일).
+   * 대표 일곱의 모든 버스 구간을 스팟 시간표 byRoute 와 맞대 본다. 고현터미널 쪽은 스팟 시간표의 from=origin · toPoiId 없음이다.
+   */
+  @Test void 대표코스_구간_대표노선은_스팟_시간표와_같은_숫자다() throws Exception {
+    var holidays = new java.util.HashSet<>(jdbc.query("SELECT holiday_date FROM holidays",
+        (rs, i) -> rs.getObject("holiday_date", java.time.LocalDate.class)));
+    var today = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+    String weekday = firstOf(com.example.geojeroserver.engine.DayClass.WEEKDAY, today, holidays);
+    String holiday = firstOf(com.example.geojeroserver.engine.DayClass.HOLIDAY, today, holidays);
+    int legs = 0;
+    for (var card : json(mvc.perform(get("/api/courses?featured=true")).andReturn()).get("courses")) {
+      var detail = json(mvc.perform(get("/api/courses/" + card.get("courseId").asLong())).andReturn());
+      for (var leg : detail.get("legs")) {
+        if (!"BUS".equals(leg.get("mode").asText())) continue;
+        legs++;
+        String where = detail.get("courseCode").asText() + " " + leg.get("fromName").asText() + " → " + leg.get("toName").asText();
+        var svc = leg.get("service");
+        var wd = json(mvc.perform(get(spotTimetable(leg, weekday))).andReturn());
+        var hd = json(mvc.perform(get(spotTimetable(leg, holiday))).andReturn());
+        var route = routeOf(wd, svc.get("routeNo").asText());
+        assertNotNull(route, where + ": 스팟 시간표에 그 노선이 없다");
+        for (var other : wd.get("byRoute")) {
+          assertTrue(other.get("count").asInt() <= route.get("count").asInt(), where + ": 더 잦은 노선이 있다 — " + other);
+        }
+        assertEquals(route.get("count").asInt(), svc.get("tripsWeekday").asInt(), where);
+        assertEquals(route.get("durationMin").asInt(), svc.get("durationMin").asInt(), where);
+        assertEquals(route.get("durationMinLow").asInt(), svc.get("durationMinLow").asInt(), where);
+        var hRoute = routeOf(hd, svc.get("routeNo").asText());
+        assertEquals(hRoute == null ? 0 : hRoute.get("count").asInt(), svc.get("tripsHoliday").asInt(), where);
+        assertEquals("NO_SERVICE".equals(hd.get("emptyReason").asText(null)), leg.get("holidayNoBus").asBoolean(), where);
+      }
+    }
+    assertEquals(37, legs, "대표 일곱의 버스 구간 수");
+  }
+
+  /**
+   * ★ 대표 코스 불변식 — 하루 한두 번뿐인 버스로만 갈 수 있는 구간은 대표 코스에 넣지 않는다(2026-09-17 사용자 결정).
+   * 모든 버스 구간의 대표 노선이 평일 3회 이상이다. 여기가 빨개지면 테스트를 낮추지 말고 코스를 사람에게 보고한다.
+   */
+  @Test void 대표코스의_모든_버스_구간은_평일_3회_이상_다닌다() throws Exception {
+    var problems = new java.util.ArrayList<String>();
+    for (var card : json(mvc.perform(get("/api/courses?featured=true")).andReturn()).get("courses")) {
+      var detail = json(mvc.perform(get("/api/courses/" + card.get("courseId").asLong())).andReturn());
+      for (var leg : detail.get("legs")) {
+        if (!"BUS".equals(leg.get("mode").asText())) continue;
+        var svc = leg.get("service");
+        if (svc == null || svc.isNull() || svc.get("tripsWeekday").asInt() < 3) {
+          problems.add(detail.get("courseCode").asText() + " " + leg.get("fromName").asText() + " → "
+              + leg.get("toName").asText() + ": " + svc);
+        }
+      }
+    }
+    assertTrue(problems.isEmpty(), String.join("\n", problems));
+  }
+
+  /** 코스 카드에도 휴일 없는 구간 목록이 늘 배열로 온다 — 옛 「평일만 / 평일·휴일」 태그를 대신한다. */
+  @Test void 코스목록_카드에_휴일_버스_없는_구간_목록이_있다() throws Exception {
+    mvc.perform(get("/api/courses?featured=true"))
+        .andExpect(jsonPath("$.courses[*].holidayNoBusLegs").isArray())
+        .andExpect(jsonPath("$.courses[0].holidayNoBusLegs.length()").value(0));
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.holidayNoBusLegs.length()").value(0));
+  }
+
+  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+  private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+  private static com.fasterxml.jackson.databind.JsonNode json(org.springframework.test.web.servlet.MvcResult r)
+      throws Exception {
+    return JSON.readTree(r.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
+  }
+
+  private static java.util.List<String> names(com.fasterxml.jackson.databind.JsonNode legs) {
+    var out = new java.util.ArrayList<String>();
+    if (legs == null) return null;
+    for (var l : legs) out.add(l.get("fromName").asText() + ">" + l.get("toName").asText());
+    return out;
+  }
+
+  private static String firstOf(com.example.geojeroserver.engine.DayClass want, java.time.LocalDate from,
+      java.util.Set<java.time.LocalDate> holidays) {
+    var d = from;
+    while (com.example.geojeroserver.engine.TimeUtil.dayClassFor(d, holidays) != want) d = d.plusDays(1);
+    return d.toString();
+  }
+
+  /** 코스 구간 → 같은 구간의 스팟 시간표 주소. 고현터미널(null)은 스팟 시간표의 기본 목적지 · from=origin 이다. */
+  private static String spotTimetable(com.fasterxml.jackson.databind.JsonNode leg, String date) {
+    var from = leg.get("fromPoiId");
+    var to = leg.get("toPoiId");
+    if (from.isNull()) return "/api/pois/" + to.asLong() + "/departures?date=" + date + "&from=origin";
+    if (to.isNull()) return "/api/pois/" + from.asLong() + "/departures?date=" + date;
+    return "/api/pois/" + from.asLong() + "/departures?date=" + date + "&toPoiId=" + to.asLong();
+  }
+
+  private static com.fasterxml.jackson.databind.JsonNode routeOf(com.fasterxml.jackson.databind.JsonNode res, String routeNo) {
+    for (var r : res.get("byRoute")) if (routeNo.equals(r.get("routeNo").asText())) return r;
+    return null;
   }
 }

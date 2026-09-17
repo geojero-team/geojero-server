@@ -151,11 +151,46 @@ public final class SpotLayer {
     return seq;
   }
 
+  /**
+   * 한 스냅샷의 회차마다 정차 목록(규칙 1~4)을 미리 만들어 둔 것.
+   *
+   * 코스 목록은 한 날짜에 구간 수십 개를 묻는다(2026-09-17 — 구간마다 가장 자주 다니는 노선). 구간마다 경로 문장을
+   * 전 회차에 걸쳐 다시 읽으면 목록 한 번에 몇 초가 걸린다. 규칙은 그대로이고 읽는 횟수만 한 번으로 줄인다 —
+   * {@link #rides(Snapshot, String, String)} 도 이것을 거친다(답이 둘로 갈라지지 않게).
+   * 시각 미상 갈래(Timetable.unknownTimeRoutes)는 원문 격자를 읽으므로 같은 스냅샷을 {@link #snapshot()} 으로 돌려준다.
+   */
+  public static final class Prepared {
+    private final Snapshot snapshot;
+    private final List<Trip> trips;
+    private final List<List<Point>> sequences;
+
+    private Prepared(Snapshot snapshot) {
+      this.snapshot = snapshot;
+      this.trips = snapshot.trips();
+      this.sequences = new ArrayList<>(trips.size());
+      for (Trip t : trips) sequences.add(sequence(t));
+    }
+
+    public Snapshot snapshot() {
+      return snapshot;
+    }
+  }
+
+  public static Prepared prepare(Snapshot s) {
+    return new Prepared(s);
+  }
+
   /** from 에서 타서 to 에서 내리는 승차를 출발 시각 순으로 — 규칙 5·6. */
   public static List<Ride> rides(Snapshot s, String from, String to) {
+    return rides(prepare(s), from, to);
+  }
+
+  /** 미리 읽어 둔 회차로 묻는다 — 답은 {@link #rides(Snapshot, String, String)} 과 같다. */
+  public static List<Ride> rides(Prepared p, String from, String to) {
     var byDepart = new LinkedHashMap<String, Ride>();
-    for (Trip t : s.trips()) {
-      var seq = sequence(t);
+    for (int k = 0; k < p.trips.size(); k++) {
+      Trip t = p.trips.get(k);
+      var seq = p.sequences.get(k);
       Ride best = null;
       for (int i = 0; i < seq.size(); i++) {
         var a = seq.get(i);

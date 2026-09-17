@@ -238,7 +238,8 @@ public class SpotTimetableController {
 
   // ── 조립 ──────────────────────────────────────────────────────────────────
 
-  private static Departure departure(SpotLayer.Ride r) {
+  /** 코스 구간 줄(CourseController.legService)도 이것으로 센다 — 「시간표 ›」와 숫자가 어긋나지 않게. */
+  static Departure departure(SpotLayer.Ride r) {
     return new Departure(r.routeNo(), TimeUtil.minToHHMM(r.departMin()),
         TimeUtil.minToHHMM(r.arriveMin()), r.durationMin(), r.estimated(), r.departEstimated());
   }
@@ -270,7 +271,7 @@ public class SpotTimetableController {
    * 대표 소요시간(가장 빠른 노선)이 앞에 오고 느린 노선이 뒤에 붙는다.
    * 같으면 자주 오는 순, 그다음 노선 번호 순 — 순서가 실행마다 흔들리지 않게 못박는다.
    */
-  private static List<RouteSummary> byRoute(List<Departure> deps) {
+  static List<RouteSummary> byRoute(List<Departure> deps) {
     var acc = new LinkedHashMap<String, List<Integer>>();
     for (var d : deps) {
       acc.computeIfAbsent(d.routeNo(), k -> new ArrayList<>());
