@@ -28,16 +28,16 @@ class CourseDataTest {
   }
 
   /**
-   * recommended_courses.txt 확정본 23개 + 배 구간을 쓰는 3-11(V36) + 코스 재설계 2차 세트 새 코스 6개(V37 —
-   * 3-12 · 3-13 · 4-11 · 4-12 · 5-04 · 6-01. 여섯 곳 코스는 처음이다).
+   * recommended_courses.txt 확정본 23개 + 배 구간을 쓰는 3-11(V36) + 코스 재설계 2차 세트 새 코스 9개(V37 —
+   * 3-12 · 3-13 · 4-11 · 4-12 · 5-04 · 6-01, 대표 8~10번 3-14 · 3-15 · 3-16. 여섯 곳 코스는 처음이다).
    */
-  @Test void 추천코스는_30개이고_코드가_스팟수_순위순이다() {
+  @Test void 추천코스는_33개이고_코드가_스팟수_순위순이다() {
     var codes = jdbc.queryForList("""
         SELECT course_code FROM courses
         WHERE course_code IS NOT NULL ORDER BY spot_count, rank_no""", String.class);
     assertEquals(List.of(
         "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10", "3-11",
-        "3-12", "3-13",
+        "3-12", "3-13", "3-14", "3-15", "3-16",
         "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10", "4-11", "4-12",
         "5-01", "5-02", "5-03", "5-04",
         "6-01"), codes);
@@ -67,10 +67,10 @@ class CourseDataTest {
   /**
    * 스팟 수별 개수 — 3·4곳은 순위 상위 10개, 5곳은 가능한 3개 전부(섬 코스 제외 후).
    * 배 시간표를 받아 섬 코스를 넣으면 이 테스트가 깨져서 알려준다.
-   * 그 위에 V36 의 3-11, V37 의 3-12 · 3-13 · 4-11 · 4-12 · 5-04 · 6-01 이 얹혔다.
+   * 그 위에 V36 의 3-11, V37 의 3-12 · 3-13 · 3-14 · 3-15 · 3-16 · 4-11 · 4-12 · 5-04 · 6-01 이 얹혔다.
    */
-  @Test void 스팟수별_코스는_3곳13_4곳12_5곳4_6곳1이다() {
-    for (int[] e : new int[][] {{3, 13}, {4, 12}, {5, 4}, {6, 1}}) {
+  @Test void 스팟수별_코스는_3곳16_4곳12_5곳4_6곳1이다() {
+    for (int[] e : new int[][] {{3, 16}, {4, 12}, {5, 4}, {6, 1}}) {
       assertEquals(e[1], jdbc.queryForObject("""
           SELECT count(*) FROM courses WHERE course_code IS NOT NULL AND spot_count = ?""",
           Integer.class, e[0]), e[0] + "곳 코스 수");
@@ -159,8 +159,9 @@ class CourseDataTest {
           WHERE l.to_poi_id IS NULL
             AND l.leg_seq < (SELECT max(leg_seq) FROM course_legs WHERE course_id = l.course_id)
           GROUP BY l.course_id HAVING count(*) > 1) x""", Integer.class), "되짚기가 두 번인 코스가 있다");
-    // 되짚기가 있는 코스는 V37 의 다섯 개다(① · ③ · ④ · ⑥ · ⑦). ② 는 직행으로만 잇는다.
-    assertEquals(List.of("3-12", "3-13", "4-11", "4-12", "5-04"), jdbc.queryForList("""
+    // 되짚기가 있는 코스는 V37 의 여덟 개다(① · ③ · ④ · ⑥ · ⑦ · ⑧ · ⑨ · ⑩). ② 는 직행으로만 잇는다.
+    // ⑧ 포로수용소 · ⑩ 거제식물원은 고현터미널과만 이어지고, ⑨ 해금강 → 옥포대첩기념공원은 직행이 없다.
+    assertEquals(List.of("3-12", "3-13", "3-14", "3-15", "3-16", "4-11", "4-12", "5-04"), jdbc.queryForList("""
         SELECT DISTINCT c.course_code FROM course_legs l JOIN courses c ON c.course_id = l.course_id
         WHERE l.to_poi_id IS NULL
           AND l.leg_seq < (SELECT max(leg_seq) FROM course_legs WHERE course_id = l.course_id)
@@ -203,8 +204,8 @@ class CourseDataTest {
         ORDER BY c.spot_count, c.rank_no, l.leg_seq""");
 
     // 35(recommended_courses.json) + 2(3-11 의 도장포 하차·승차 — V36)
-    // + 22(V37 — 4-11 둘 · 6-01 셋 · 3-12 넷 · 3-13 다섯 · 4-12 넷 · 5-04 넷)
-    assertEquals(59, est.size(), "추정이 붙은 승차 수");
+    // + 30(V37 — 4-11 둘 · 6-01 셋 · 3-12 넷 · 3-13 다섯 · 4-12 넷 · 5-04 넷 · 3-14 넷 · 3-15 둘 · 3-16 둘)
+    assertEquals(67, est.size(), "추정이 붙은 승차 수");
     var noTimeCell = java.util.Set.of("도장포", "대금교차로", "맹종죽테마파크",
         "포로수용소", "식물원", "옥포대첩기념공원");
     assertEquals(noTimeCell, java.util.Set.copyOf(jdbc.queryForList("""
@@ -229,7 +230,8 @@ class CourseDataTest {
   }
 
   /**
-   * 같은 정류장 구간은 두 쌍뿐이다 — 조선해양문화관 → 씨월드(둘 다 '신촌', 9개 코스 — V37 의 6-01 포함)와
+   * 같은 정류장 구간은 두 쌍뿐이다 — 조선해양문화관 ↔ 씨월드(둘 다 '신촌', 10개 코스 — 조선해양문화관 → 씨월드 9개(V37 의 6-01 포함),
+   * 거꾸로 씨월드 → 조선해양문화관은 V37 의 3-16 하나)와
    * 도장포유람선 → 바람의언덕(둘 다 '도장포', 3-11 하나. 원문 「도보 1분거리에 바람의 언덕이 있습니다」).
    * 버스를 타지 않는다.
    *
@@ -247,10 +249,13 @@ class CourseDataTest {
         JOIN pois pt ON pt.poi_id = l.to_poi_id
         WHERE c.course_code IS NOT NULL AND l.mode = 'SAME_STOP'""");
 
-    assertEquals(10, same.size(), "조선해양문화관 → 씨월드 9개 + 도장포유람선 → 바람의언덕 1개");
+    assertEquals(11, same.size(), "조선해양문화관 → 씨월드 9개 + 씨월드 → 조선해양문화관 1개 + 도장포유람선 → 바람의언덕 1개");
     assertEquals(9, same.stream().filter(x -> "거제조선해양문화관".equals(x.get("frm"))).count());
+    assertEquals(List.of("3-16"), same.stream().filter(x -> "거제씨월드".equals(x.get("frm")))
+        .map(x -> (String) x.get("course_code")).toList());
     for (var s : same) {
       assertTrue(("거제조선해양문화관".equals(s.get("frm")) && "거제씨월드".equals(s.get("dst")))
+          || ("거제씨월드".equals(s.get("frm")) && "거제조선해양문화관".equals(s.get("dst")))
           || ("도장포유람선".equals(s.get("frm")) && "바람의언덕".equals(s.get("dst"))),
           "같은 정류장 쌍이 아니다: " + s);
       assertEquals(0, ((Number) s.get("duration_min")).intValue());
@@ -336,7 +341,7 @@ class CourseDataTest {
   }
 
   /**
-   * 제목·소개는 옛 대표 코스(V28 의 10개 + 4-10) · 3-11(V36) · 2차 세트 새 코스 6개(V37)에 있다.
+   * 제목·소개는 옛 대표 코스(V28 의 10개 + 4-10) · 3-11(V36) · 2차 세트 새 코스 9개(V37)에 있다.
    * 옛 대표 코스의 글은 대표 목록에서 빠져도 지우지 않는다 — 코스 상세 제목으로 그대로 쓰인다.
    * 소개는 카드 한 장에 들어가야 하므로 150자 이하다. Claude 초안이라 사용자가 고칠 수 있다(V28 · V37 주석).
    */
@@ -345,6 +350,7 @@ class CourseDataTest {
         SELECT course_code, title, intro FROM courses
         WHERE title IS NOT NULL OR intro IS NOT NULL ORDER BY course_code""");
     assertEquals(List.of("3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-11", "3-12", "3-13",
+            "3-14", "3-15", "3-16",
             "4-02", "4-03", "4-09", "4-10", "4-11", "4-12", "5-01", "5-04", "6-01"),
         titled.stream().map(r -> (String) r.get("course_code")).toList());
     for (var r : titled) {
@@ -363,11 +369,12 @@ class CourseDataTest {
    * ★ 대표 목록은 사람이 고른 순서다(featured_rank) — 옛 「9경 많은 순 · 버스 짧은 순」 정렬을 버렸다.
    * 카드마다 **어느 성격 축으로 골랐는지**(badge_axis)가 붙는다. 사용자가 축을 셋으로 나눴다(코스재설계 §5-1):
    * 거제시 공식 코스(OFFICIAL) 둘 · 분류(THEME) 셋 · 거제 9경(NINE) 둘. ⑤ 는 운영 중인 3-11 을 그대로 쓴다.
+   * 8~10번은 나머지 세 자리 후보 조사 · 반박 검증을 통과한 셋이다 — ⑧ 거제시 3일코스(OFFICIAL) · ⑨ ⑩ 분류(THEME).
    * 옛 코스 24개 중 3-11 을 뺀 23개는 대표가 아니다 — 지우지 않는다(저장 일정 · 지도 화면이 쓴다).
    */
-  @Test void 대표코스는_일곱이고_순서와_성격축이_정해져_있다() {
+  @Test void 대표코스는_열이고_순서와_성격축이_정해져_있다() {
     assertEquals(List.of("1 4-11 OFFICIAL", "2 6-01 OFFICIAL", "3 3-12 THEME", "4 3-13 THEME",
-            "5 3-11 THEME", "6 4-12 NINE", "7 5-04 NINE"),
+            "5 3-11 THEME", "6 4-12 NINE", "7 5-04 NINE", "8 3-14 OFFICIAL", "9 3-15 THEME", "10 3-16 THEME"),
         rows("""
             SELECT featured_rank, course_code, badge_axis FROM courses
             WHERE featured_rank IS NOT NULL ORDER BY featured_rank""").stream()
@@ -382,11 +389,13 @@ class CourseDataTest {
    * ★ 대표 코스 제목은 **무엇을 보는가**만 말한다(2026-09-17 사용자 지적). 카드 사진 위 배지가 이미
    * 「거제시 당일코스의 4곳 · 원문 순서 그대로」 · 「거제 9경 ①②④⑥」을 말하는데 옛 제목이
    * 「거제시 당일코스의 네 곳, …」 · 「거제 9경 네 곳, …」로 같은 말을 한 번 더 했다.
-   * 그래서 배지의 말(거제시 · 당일코스 · 2일코스 · 원문 순서 · N곳, 9경 축이면 9경)을 제목에 쓰지 않는다.
+   * 그래서 배지의 말(거제시 · 당일코스 · 2일코스 · 3일코스 · 원문 순서 · N곳, 분류 배지의 분류 이름, 9경 축이면 9경)을 제목에 쓰지 않는다.
+   * 분류 이름은 분류 칩 라벨 그대로다(클라 theme.* — 「역사·유적 2곳과 전망·명소 1곳」).
    * 길이는 카드 두 줄 안 — 두 줄에 든 것을 화면으로 본 가장 긴 제목이 ④ 25자이고, 옛 ① 31자는 세 줄로 넘쳤다.
    */
   @Test void 대표코스_제목은_배지의_말을_되풀이하지_않고_두_줄_안이다() {
-    var badgeWords = java.util.regex.Pattern.compile("거제시|당일코스|2일코스|원문|순서|곳");
+    var badgeWords = java.util.regex.Pattern.compile(
+        "거제시|당일코스|2일코스|3일코스|원문|순서|곳|바다·해변|섬·유람선|전망·명소|정원·숲|역사·유적|전시·체험");
     for (var r : rows("""
         SELECT course_code, badge_axis, title FROM courses
         WHERE featured_rank IS NOT NULL ORDER BY featured_rank""")) {
@@ -401,6 +410,27 @@ class CourseDataTest {
   }
 
   /**
+   * 대표 제목 열 개가 서로 비슷하게 시작하거나 끝나면 카드가 같아 보인다. 이미 겹친 것이 둘 있다 —
+   * ③ ⑥ 이 「풍차 언덕…」으로 시작하고 ⑥ ⑦ 이 「…포로수용소 유적까지」로 끝난다. 8~10번을 넣으면서 **더 늘리지 않는다**.
+   * 첫 어절 · 끝 어절(띄어쓰기로 자른 조각)로 본다.
+   */
+  @Test void 대표코스_제목의_첫머리와_끝말은_이미_겹친_둘_말고_겹치지_않는다() {
+    var titles = jdbc.queryForList(
+        "SELECT title FROM courses WHERE featured_rank IS NOT NULL ORDER BY featured_rank", String.class);
+    var first = new java.util.TreeMap<String, Integer>();
+    var last = new java.util.TreeMap<String, Integer>();
+    for (String t : titles) {
+      String[] w = t.split(" ");
+      first.merge(w[0], 1, Integer::sum);
+      last.merge(w[w.length - 1], 1, Integer::sum);
+    }
+    first.values().removeIf(n -> n < 2);
+    last.values().removeIf(n -> n < 2);
+    assertEquals(Map.of("풍차", 2), first, "첫 어절이 겹친 제목");
+    assertEquals(Map.of("유적까지", 2), last, "끝 어절이 겹친 제목");
+  }
+
+  /**
    * 거제시 공식 관광코스(tour.geoje.go.kr 관광코스 · 최종수정 2026-05-16) — 원문 HTML 로 직접 센 값이다.
    *   당일코스 여섯 곳: 포로수용소유적공원 · 학동흑진주몽돌해변 · 바람의언덕/신선대 · 거제해금강/외도 · 거제조선해양문화관 ·
    *     거제맹종죽테마파크 (거제대교 · 거가대교는 다리라 세지 않는다)
@@ -408,13 +438,18 @@ class CourseDataTest {
    *     거제해금강/외도 · 여차-홍포해변비경 · 명사해수욕장) + 2일차 아홉(거제자연휴양림 · 공곶이 · 거제조선해양문화관 ·
    *     거제씨월드 · 능포양지암조각공원 · 조선소 견학 · 옥포대첩기념공원 · 김영삼대통령전시관/생가 · 거제맹종죽테마파크).
    *     「산방산비원」은 원문 HTML 주석 안이라 화면에 나오지 않아 세지 않는다.
+   *   3일코스 열아홉 곳: 1일차 일곱(포로수용소유적공원 · 청마생가/기념관 · 기성관 · 거제향교 · 명사해수욕장 · 여차-홍포해변비경 ·
+   *     바람의 언덕/신선대) + 2일차 여덟(거제자연휴양림 · 학동흑진주몽돌해변 · 거제해금강/외도 · 공곶이 · 거제조선해양문화관 ·
+   *     거제씨월드 · 조선소 견학 · 능포양지암조각공원) + 3일차 넷(동백섬지심도 · 옥포대첩기념공원 · 김영삼대통령전시관/생가 ·
+   *     거제맹종죽테마파크). 여기서도 「산방산비원」은 1일차 HTML 주석 안이다. 기성관은 거제현 관아의 객사다(TourAPI 소개문).
+   *     3-14 는 포로수용소 1 → 기성관 3 → 바람의 언덕 7 이라 원문 순서 그대로다.
    * 코스가 공식 코스를 가리키는 것과 성격 축이 OFFICIAL 인 것은 같은 말이다.
    */
   @Test void 거제시_공식_코스는_원문대로_세고_OFFICIAL_코스만_가리킨다() {
-    assertEquals(List.of("당일코스 6", "2일코스 16"),
+    assertEquals(List.of("당일코스 6", "2일코스 16", "3일코스 19"),
         rows("SELECT name, place_count FROM official_courses ORDER BY place_count").stream()
             .map(r -> r.get("name") + " " + r.get("place_count")).toList());
-    assertEquals(List.of("4-11 당일코스 4 true", "6-01 2일코스 6 true"),
+    assertEquals(List.of("3-14 3일코스 3 true", "4-11 당일코스 4 true", "6-01 2일코스 6 true"),
         rows("""
             SELECT c.course_code, o.name, c.official_matched, c.official_order_kept
             FROM courses c JOIN official_courses o ON o.official_code = c.official_code
@@ -430,17 +465,23 @@ class CourseDataTest {
   }
 
   /**
-   * ★ 새 코스 여섯의 편 — 코스재설계 편 고르기 규칙으로 서버 시간표(스팟 계층 평일 2026-09-14 · 휴일 2026-09-19)를
+   * ★ 새 코스 아홉의 편 — 코스재설계 편 고르기 규칙으로 서버 시간표(스팟 계층 평일 2026-09-14 · 휴일 2026-09-19)를
    * **전수로 돌려** 고른 값이다. `*` 는 앞뒤 정류장으로 감싼 추정 시각이다.
    * 버스 시각 자체는 CourseTimetableConsistencyTest 가 시간표와 대조한다. 여기서는 **고른 결과**를 못박는다 —
    * 코스를 다시 적재해 편이 바뀌면 여기가 빨개진다. 기대값을 고치기 전에 편 고르기 규칙(V37 주석)으로 다시 확인한다.
    */
-  @Test void 새_코스_여섯의_편은_고른_그대로다() {
+  @Test void 새_코스_아홉의_편은_고른_그대로다() {
     assertEquals(List.of(
             "3-12: 55 고현 09:05→도장포 09:55* | 55 도장포 11:45*→해금강 11:55 | 55 해금강 14:48→고현 15:40"
                 + " | 32-2 고현 16:02→대금교차로 16:47* | 33-2 대금교차로 18:05*→고현 18:55",
             "3-13: 50-2 고현 09:35→식물원 10:05* | 50-2 식물원 12:15*→고현 12:45 | 33 고현 13:02→대금교차로 13:47*"
                 + " | 32 대금교차로 15:05*→맹종죽테마파크 15:35* | 31 맹종죽테마파크 16:57*→고현 17:18",
+            "3-14: 100-1 고현 09:35→포로수용소 09:47* | 110 포로수용소 11:00*→고현 11:09 | 71 고현 11:30→거제 12:05"
+                + " | 55 거제 13:25→도장포 13:55* | 55 도장포 16:38*→고현 17:30",
+            "3-15: 71 고현 07:45→거제 08:20 | 55 거제 09:25→해금강 09:55 | 55 해금강 12:48→고현 13:40"
+                + " | 32-1 고현 14:02→옥포대첩기념공원 15:10* | 32 옥포대첩기념공원 16:45*→고현 17:55",
+            "3-16: 4000 고현 09:10→지세포 09:42 | 같은 정류장 10:42 | 4000 지세포 12:47→고현 13:20"
+                + " | 50-2 고현 13:35→식물원 14:05* | 50-2 식물원 16:15*→고현 16:45",
             "4-11: 55 고현 06:25→학동 07:05 | 55 학동 09:45→도장포 09:55* | 55 도장포 11:45*→해금강 11:55"
                 + " | 55 해금강 14:48→고현 15:40 | 22 고현 16:08→지세포 16:52 | 4000 지세포 17:57→고현 18:30",
             "4-12: 55 고현 09:05→도장포 09:55* | 55 도장포 11:45*→해금강 11:55 | 55 해금강 14:48→학동 15:00"
@@ -462,13 +503,13 @@ class CourseDataTest {
             FROM courses c
             JOIN course_legs l ON l.course_id = c.course_id
             LEFT JOIN course_rides r ON r.leg_id = l.leg_id
-            WHERE c.course_code IN ('3-12', '3-13', '4-11', '4-12', '5-04', '6-01')
+            WHERE c.course_code IN ('3-12', '3-13', '3-14', '3-15', '3-16', '4-11', '4-12', '5-04', '6-01')
             GROUP BY c.course_code ORDER BY c.course_code""").stream()
             .map(r -> r.get("course_code") + ": " + r.get("chain")).toList());
   }
 
   /**
-   * 편 고르기 규칙이 적재분에서도 서는지 — 새 코스 여섯의 모든 이음을 본다(V37 주석 「편 고르기 규칙」).
+   * 편 고르기 규칙이 적재분에서도 서는지 — 새 코스 아홉의 모든 이음을 본다(V37 주석 「편 고르기 규칙」).
    *   · 스팟 도착 = 앞 구간 도착, 스팟 출발 = 다음 구간 출발(체류가 구간과 이어진다)
    *   · 스팟에서 다음 버스까지 60분 이상 — 같은 정류장으로 걸어 옮기면 두 곳이라 120분
    *   · 고현터미널에서 갈아타기 10분 이상
@@ -476,7 +517,7 @@ class CourseDataTest {
    * 「같은 노선인데 회차마다 소요시간이 흔들리는 구간」 규칙은 시간표가 있어야 볼 수 있어 여기서 못 본다 — V37 주석에 결과를 적었다.
    */
   @Test void 새_코스는_스팟_60분_터미널_10분_추정_이음_10분을_지킨다() {
-    for (String code : List.of("3-12", "3-13", "4-11", "4-12", "5-04", "6-01")) {
+    for (String code : List.of("3-12", "3-13", "3-14", "3-15", "3-16", "4-11", "4-12", "5-04", "6-01")) {
       var legs = rows("""
           SELECT l.leg_seq, l.mode::text AS mode, l.from_poi_id, l.to_poi_id, l.depart_time, l.arrive_time,
                  r.board_estimated, r.alight_estimated
@@ -537,15 +578,15 @@ class CourseDataTest {
   }
 
   /**
-   * 새 코스 여섯의 사슬 모양 — 출발 · 복귀 · 마지막 스팟 도착(18:30 이하) · 복귀(20:00 이하).
+   * 새 코스 아홉의 사슬 모양 — 출발 · 복귀 · 마지막 스팟 도착(18:30 이하) · 복귀(20:00 이하).
    */
   @Test void 새_코스는_마지막_스팟_18시30분_복귀_20시_안에_끝난다() {
     assertEquals(List.of(
-            "3-12 09:05 18:55", "3-13 09:35 17:18", "4-11 06:25 18:30",
-            "4-12 09:05 19:40", "5-04 08:02 19:05", "6-01 06:25 19:18"),
+            "3-12 09:05 18:55", "3-13 09:35 17:18", "3-14 09:35 17:30", "3-15 07:45 17:55", "3-16 09:10 16:45",
+            "4-11 06:25 18:30", "4-12 09:05 19:40", "5-04 08:02 19:05", "6-01 06:25 19:18"),
         rows("""
             SELECT course_code, to_char(depart_time, 'HH24:MI') AS d, to_char(return_time, 'HH24:MI') AS r
-            FROM courses WHERE course_id BETWEEN 125 AND 130 ORDER BY course_code""").stream()
+            FROM courses WHERE course_id BETWEEN 125 AND 133 ORDER BY course_code""").stream()
             .map(r -> r.get("course_code") + " " + r.get("d") + " " + r.get("r")).toList());
     for (var r : rows("""
         SELECT c.course_code, max(cp.arrive_time) AS last_arrive, c.return_time
