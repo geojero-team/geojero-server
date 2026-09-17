@@ -394,6 +394,8 @@ class CourseDataTest {
    * 새 배지의 말(추천 · 관광코스)도 제목에서 막는다. 옛 말(당일코스 · 원문 · 곳)은 상세 안내 줄로 옮겨 갔으니 계속 막는다.
    * 분류 이름은 분류 칩 라벨 그대로다(클라 theme.*).
    * 길이는 카드 두 줄 안 — 두 줄에 든 것을 화면으로 본 가장 긴 제목이 ④ 25자이고, 옛 ① 31자는 세 줄로 넘쳤다.
+   * 2026-09-18 V38 에서 26자로 올렸다 — ⑩ 「흰고래 벨루가와 선박의 역사, 그리고 유리 정글」(26자)을 카드 제목 칸
+   * (헤드리스 크롬 390 폭 · 글 폭 264px)에 넣어 보니 두 줄이었다. 사용자가 고른 문구라 한도를 렌더에 맞췄다.
    */
   @Test void 대표코스_제목은_배지의_말을_되풀이하지_않고_두_줄_안이다() {
     var badgeWords = java.util.regex.Pattern.compile(
@@ -407,7 +409,7 @@ class CourseDataTest {
       if ("NINE".equals(r.get("badge_axis"))) {
         assertFalse(title.contains("9경"), where + ": 거제 9경 배지와 같은 말이다");
       }
-      assertTrue(title.codePointCount(0, title.length()) <= 25, where + ": 카드 두 줄을 넘길 만큼 길다");
+      assertTrue(title.codePointCount(0, title.length()) <= 26, where + ": 카드 두 줄을 넘길 만큼 길다");
     }
   }
 
@@ -465,11 +467,12 @@ class CourseDataTest {
   }
 
   /**
-   * 대표 제목 열 개가 서로 비슷하게 시작하거나 끝나면 카드가 같아 보인다. 이미 겹친 것이 둘 있다 —
-   * ③ ⑥ 이 「풍차 언덕…」으로 시작하고 ⑥ ⑦ 이 「…포로수용소 유적까지」로 끝난다. 8~10번을 넣으면서 **더 늘리지 않는다**.
+   * 대표 제목 열 개가 서로 비슷하게 시작하거나 끝나면 카드가 같아 보인다.
+   * V37 까지는 겹친 것이 둘 있었다 — ③ ⑥ 이 「풍차 언덕…」으로 시작하고 ⑥ ⑦ 이 「…포로수용소 유적까지」로 끝났다.
+   * V38(2026-09-18)에서 ⑥ ⑦ 제목을 다시 쓰며 둘 다 풀렸으므로 이제 **하나도 겹치지 않는다**.
    * 첫 어절 · 끝 어절(띄어쓰기로 자른 조각)로 본다.
    */
-  @Test void 대표코스_제목의_첫머리와_끝말은_이미_겹친_둘_말고_겹치지_않는다() {
+  @Test void 대표코스_제목의_첫머리와_끝말은_겹치지_않는다() {
     var titles = jdbc.queryForList(
         "SELECT title FROM courses WHERE featured_rank IS NOT NULL ORDER BY featured_rank", String.class);
     var first = new java.util.TreeMap<String, Integer>();
@@ -481,8 +484,8 @@ class CourseDataTest {
     }
     first.values().removeIf(n -> n < 2);
     last.values().removeIf(n -> n < 2);
-    assertEquals(Map.of("풍차", 2), first, "첫 어절이 겹친 제목");
-    assertEquals(Map.of("유적까지", 2), last, "끝 어절이 겹친 제목");
+    assertEquals(Map.of(), first, "첫 어절이 겹친 제목");
+    assertEquals(Map.of(), last, "끝 어절이 겹친 제목");
   }
 
   /**
