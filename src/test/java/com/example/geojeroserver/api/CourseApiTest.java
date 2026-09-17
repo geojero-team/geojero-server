@@ -242,7 +242,7 @@ class CourseApiTest {
    * 4-11 은 고현터미널 → 지세포 22번(20번대 평일/휴일 분리), 4-12 · 5-04 는 포로수용소 100 · 110번 편이 평일에만 있다.
    * 8~10번 중 3-15 · 3-16 은 공통 편으로 이어져 참이고, 3-14 는 포로수용소 100-1 · 110번 편이 평일에만 있어 거짓이다.
    */
-  @Test void 휴일에도_타는_코스는_열이다() throws Exception {
+  @Test void 휴일에도_타는_코스는_열둘이다() throws Exception {
     mvc.perform(get("/api/courses"))
         .andExpect(jsonPath("$.courses[?(@.holidayService == true)].courseCode")
             .value(org.hamcrest.Matchers.containsInAnyOrder(
