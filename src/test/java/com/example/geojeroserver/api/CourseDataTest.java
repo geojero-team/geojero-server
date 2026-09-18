@@ -436,33 +436,51 @@ class CourseDataTest {
   }
 
   /**
-   * ★ 대표 코스 소개는 짧게 줄여도 **코스의 스팟을 빠짐없이 방문 순서대로** 말한다(2026-09-17 밤 검토).
-   * 110자로 줄이면서 ② 6-01 이 「거제시 2일코스 가운데 여섯 곳」이라 적고 다섯 곳만 불렀다 — 조선해양문화관이 빠졌고
-   * 거제씨월드는 「지세포의 벨루가」로만 남았다. 카드 사진이 조선해양문화관인데 글에는 그 이름이 없었다.
-   * 스팟마다 소개에 나와야 할 말(이름이나 TourAPI 소개문의 다른 이름)을 두고, 앞 스팟이 나온 자리 뒤에서 다음 스팟을 찾는다.
-   * ⑤ 3-11 처럼 첫 문장이 외도를 먼저 말해도 도장포 → 외도 → 바람의언덕 차례가 뒤에서 이어지면 된다.
+   * ★ 대표 코스 소개는 **코스에 없는 스팟을 말하지 않는다**.
+   * 2026-09-18 V39 에서 소개를 다시 썼다(사용자: *"너무 AI 티가 나고 단순 나열식"*) — 스팟 순서는 카드 위 줄이 이미 보여주므로
+   * 소개는 스팟을 다 부르지 않고 한두 곳으로 **이 코스를 왜 고르나**를 말한다. 그래서 옛 규칙(09-17 밤 「스팟을 빠짐없이 방문 순서대로」)을 버렸다.
+   * 남는 위험은 거꾸로다 — 소개가 코스에 없는 곳을 말하면 카드 위 순서 줄과 어긋난다(옛 ② 가 「여섯 곳」이라 적고 다섯만 부른 것과 같은 종류).
+   * 스팟마다 소개에 나올 만한 말(이름 · TourAPI 소개문의 다른 이름 · 대표 볼거리)을 두고, 나오면 그 스팟이 코스에 있어야 한다.
    */
-  @Test void 대표코스_소개는_스팟을_빠짐없이_방문_순서대로_말한다() {
+  @Test void 대표코스_소개는_코스에_없는_스팟을_말하지_않는다() {
     var mention = Map.ofEntries(
-        Map.entry("학동몽돌해변", "학동"), Map.entry("바람의언덕", "바람의 ?언덕"), Map.entry("해금강", "해금강"),
-        Map.entry("조선해양문화관", "조선해양문화관"), Map.entry("거제씨월드", "씨월드"), Map.entry("양지암조각공원", "양지암"),
-        Map.entry("옥포대첩기념공원", "옥포"), Map.entry("맹종죽테마공원", "맹종죽"), Map.entry("매미성", "매미성"),
-        Map.entry("거제식물원", "식물원|정글돔"), Map.entry("포로수용소", "포로수용소"), Map.entry("거제현 관아", "거제현 관아"),
-        Map.entry("도장포유람선", "도장포"), Map.entry("외도보타니아", "외도"));
+        Map.entry("학동몽돌해변", "학동|몽돌"), Map.entry("바람의언덕", "바람의 ?언덕|풍차"), Map.entry("해금강", "해금강|바위섬"),
+        Map.entry("조선해양문화관", "조선해양|4D"), Map.entry("거제씨월드", "씨월드|벨루가|돌고래"), Map.entry("양지암조각공원", "양지암|조각"),
+        Map.entry("옥포대첩기념공원", "옥포|이순신"), Map.entry("맹종죽테마공원", "맹종죽|대나무|죽림"), Map.entry("매미성", "매미성|돌 성벽"),
+        Map.entry("거제식물원", "식물원|정글돔|유리 돔"), Map.entry("포로수용소", "포로|수용소"), Map.entry("거제현 관아", "관아|기성관"),
+        Map.entry("도장포유람선", "도장포"), Map.entry("외도보타니아", "외도|보타니아|비너스가든"),
+        Map.entry("공곶이·내도", "공곶이|내도"), Map.entry("지심도", "지심도"), Map.entry("청마기념관", "청마"),
+        Map.entry("김영삼 생가", "김영삼"), Map.entry("여차홍포해안도로", "여차|홍포"));
     for (var r : rows("""
         SELECT c.course_code, c.intro, string_agg(p.short_name, '|' ORDER BY cp.poi_seq) AS spots
         FROM courses c JOIN course_pois cp ON cp.course_id = c.course_id JOIN pois p ON p.poi_id = cp.poi_id
         WHERE c.featured_rank IS NOT NULL
         GROUP BY c.course_code, c.intro, c.featured_rank ORDER BY c.featured_rank""")) {
       String intro = (String) r.get("intro");
-      int from = 0;
-      for (String spot : ((String) r.get("spots")).split("\\|")) {
-        String word = mention.get(spot);
-        assertNotNull(word, r.get("course_code") + ": 스팟 「" + spot + "」이 소개에 나올 말을 테스트에 정하지 않았다");
-        var m = java.util.regex.Pattern.compile(word).matcher(intro);
-        assertTrue(m.find(from), r.get("course_code") + ": 소개가 「" + spot + "」을 방문 순서 자리에서 말하지 않는다 — " + intro);
-        from = m.end();
+      var spots = List.of(((String) r.get("spots")).split("\\|"));
+      for (var e : mention.entrySet()) {
+        if (java.util.regex.Pattern.compile(e.getValue()).matcher(intro).find()) {
+          assertTrue(spots.contains(e.getKey()),
+              r.get("course_code") + ": 소개가 코스에 없는 「" + e.getKey() + "」을 말한다 — " + intro);
+        }
       }
+    }
+  }
+
+  /**
+   * ★ 대표 코스 소개는 **여행자에게 하는 말**이다(2026-09-18 사용자 — *"휴머니즘적인 문구가 아니야"*).
+   * 앱 전체가 해요체(「타요 · 내려요」)인데 옛 소개만 「~합니다」였고, 「원문 순서대로」 · 「가운데 네 곳」 같은 우리 데이터 말이 들어 있었다.
+   * 그 말은 카드 배지(「거제시 추천 관광코스」)와 코스 상세 머리가 이미 한다.
+   */
+  @Test void 대표코스_소개는_해요체이고_데이터_말을_쓰지_않는다() {
+    var dataWords = java.util.regex.Pattern.compile("원문|순서|가운데 [가-힣]+ 곳|습니다|니다\\.|마칩니다");
+    for (var r : rows("""
+        SELECT course_code, intro FROM courses
+        WHERE featured_rank IS NOT NULL ORDER BY featured_rank""")) {
+      String intro = (String) r.get("intro");
+      String where = r.get("course_code") + " 「" + intro + "」";
+      assertTrue(intro.endsWith("요."), where + ": 해요체로 끝나지 않는다");
+      assertFalse(dataWords.matcher(intro).find(), where + ": 데이터 말이나 「~합니다」가 들어 있다");
     }
   }
 
