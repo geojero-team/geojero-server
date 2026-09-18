@@ -187,8 +187,9 @@ public class CourseController {
    * 해금강은 내리는 정류장에서 직선 1.1km 다(2026-09-16 사용자 결정 — 디자인브리프 부록 H).
    * 값은 타는 곳 표(boarding_stops, V26·V34)에서 오고 {@code (from_poi_id, to_poi_id, route_no)} 로 찾는다 —
    * 코스 구간의 키와 모양이 같다. 거리는 **직선**이고 걷는 거리가 아니다(걷는 거리·시간은 어느 원문에도 없다 — 절대규칙 1).
+   * 좌표는 TAGO 정류소 원문 그대로다(2026-09-18) — 화면이 걷는 칸마다 카카오맵 도보 길찾기(정류장 ↔ 스팟)를 연다.
    */
-  public record StopWalk(String stop, Integer distanceM) {}
+  public record StopWalk(String stop, Integer distanceM, Double lat, Double lng) {}
 
   /** 한 구간·노선의 타는 곳과 내리는 곳. 표의 한 줄에 둘 다 들어 있다. */
   private record StopPair(StopWalk board, StopWalk alight) {}
@@ -563,6 +564,10 @@ public class CourseController {
     return fromPoi + ">" + toPoi + ">" + routeNo;
   }
 
+  private static Double decimal(java.math.BigDecimal v) {
+    return v == null ? null : v.doubleValue();
+  }
+
   /**
    * 이 코스가 지나는 (출발, 가는 곳)의 노선마다 타는 · 내리는 정류장. 구간마다 쿼리를 쏘지 않게 한 번에 받는다.
    * 노선을 거르지 않는다 — 구간 줄이 적는 노선(대표 노선)은 코스가 탄 편의 노선과 다를 수 있다(2026-09-17).
@@ -572,7 +577,8 @@ public class CourseController {
     var out = new HashMap<String, StopPair>();
     jdbc.query("""
         SELECT b.from_poi_id, b.to_poi_id, b.route_no,
-               b.stop_name, b.distance_m, b.alight_stop_name, b.alight_distance_m
+               b.stop_name, b.distance_m, b.lat, b.lng,
+               b.alight_stop_name, b.alight_distance_m, b.alight_lat, b.alight_lng
         FROM boarding_stops b
         WHERE b.status = 'RESOLVED'
           AND EXISTS (SELECT 1 FROM course_legs l
@@ -582,8 +588,10 @@ public class CourseController {
         rs -> {
           out.put(stopKey(rs.getLong("from_poi_id"), rs.getLong("to_poi_id"), rs.getString("route_no")),
               new StopPair(
-                  new StopWalk(rs.getString("stop_name"), (Integer) rs.getObject("distance_m")),
-                  new StopWalk(rs.getString("alight_stop_name"), (Integer) rs.getObject("alight_distance_m"))));
+                  new StopWalk(rs.getString("stop_name"), (Integer) rs.getObject("distance_m"),
+                      decimal(rs.getBigDecimal("lat")), decimal(rs.getBigDecimal("lng"))),
+                  new StopWalk(rs.getString("alight_stop_name"), (Integer) rs.getObject("alight_distance_m"),
+                      decimal(rs.getBigDecimal("alight_lat")), decimal(rs.getBigDecimal("alight_lng")))));
         }, courseId, terminal, terminal);
     return out;
   }

@@ -3,6 +3,7 @@ package com.example.geojeroserver.api;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.hamcrest.Matchers.closeTo;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -318,6 +319,20 @@ class CourseApiTest {
         // 마지막 구간은 고현터미널로 돌아간다 — 내려서 갈 스팟이 없다
         .andExpect(jsonPath("$.legs[3].toName").value("고현터미널"))
         .andExpect(jsonPath("$.legs[3].alight").doesNotExist());
+  }
+
+  /**
+   * 정류장에는 좌표가 있다 — 코스 상세의 걷는 칸마다 카카오맵 도보 길찾기(정류장 ↔ 스팟)를 열려면 두 점이 필요하다(2026-09-18 사용자 결정).
+   * 값은 타는 곳 표(boarding_stops)의 TAGO 정류소 좌표 원문 그대로다 — 타는 곳은 V26 lat/lng, 내리는 곳은 V34 alight_lat/lng.
+   */
+  @Test void 코스상세_정류장에는_TAGO_좌표가_있다() throws Exception {
+    mvc.perform(get("/api/courses/101"))
+        .andExpect(jsonPath("$.legs[0].alight.stop").value("학동"))
+        .andExpect(jsonPath("$.legs[0].alight.lat").value(closeTo(34.77, 0.05)))
+        .andExpect(jsonPath("$.legs[0].alight.lng").value(closeTo(128.64, 0.05)))
+        .andExpect(jsonPath("$.legs[3].board.stop").value("도장포"))
+        .andExpect(jsonPath("$.legs[3].board.lat").value(closeTo(34.74, 0.05)))
+        .andExpect(jsonPath("$.legs[3].board.lng").value(closeTo(128.66, 0.05)));
   }
 
   @Test void 코스상세_내리는_정류장은_그_구간의_노선을_따른다() throws Exception {
