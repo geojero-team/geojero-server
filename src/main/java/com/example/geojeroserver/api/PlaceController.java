@@ -143,8 +143,6 @@ public class PlaceController {
         detail.put("overview", info.overview());
         detail.put("openTime", intro.get("opentimefood"));
         detail.put("restDay", intro.get("restdatefood"));
-        // 취급 메뉴 원문(「낙지해물칼국수 / 양념게장정식 / … 등」) — 화면이 「/」로 나눠 칩으로 그린다. 가격은 TourAPI 에 없다
-        detail.put("menus", intro.get("treatmenu"));
       } else {
         detail.put("checkIn", intro.get("checkintime"));
         detail.put("checkOut", intro.get("checkouttime"));
