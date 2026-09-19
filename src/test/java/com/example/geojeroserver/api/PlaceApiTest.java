@@ -83,6 +83,17 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[0].nearSpot.shortName").value("거제씨월드"));
   }
 
+  @Test void 목록에도_좌표가_있어_홈_지도에_찍는다_관광정보와_무관한_우리_DB_값() throws Exception {
+    when(tourApi.placeInfo(any(), any())).thenReturn(null);
+    mvc.perform(get("/api/places?kind=STAY"))
+        .andExpect(jsonPath("$.places[0].name").value("소노캄 거제"))
+        .andExpect(jsonPath("$.places[0].lat").value(34.8433682))
+        .andExpect(jsonPath("$.places[0].lng").value(128.7029354));
+    mvc.perform(get("/api/places?kind=FOOD"))
+        .andExpect(jsonPath("$.places[0].lat").value(34.7721525))
+        .andExpect(jsonPath("$.places[0].lng").value(128.6380248));
+  }
+
   @Test void 종류가_틀리면_400() throws Exception {
     mvc.perform(get("/api/places?kind=CAFE")).andExpect(status().isBadRequest());
   }

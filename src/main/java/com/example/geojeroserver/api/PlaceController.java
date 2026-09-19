@@ -34,8 +34,9 @@ public class PlaceController {
 
   public record NearSpot(long poiId, String shortName, int distanceM, double lat, double lng) {}
 
+  /** lat · lng — 홈 지도의 숙소 · 맛집 핀(2026-09-19). 우리 DB 값이라 TourAPI 가 실패해도 있다. */
   public record PlaceListItem(long placeId, String kind, String name, String category, String imageUrl,
-                              Integer grade, String restDay, NearSpot nearSpot) {}
+                              Integer grade, String restDay, NearSpot nearSpot, double lat, double lng) {}
 
   public record PlacesRes(List<PlaceListItem> places) {}
 
@@ -123,7 +124,7 @@ public class PlaceController {
     var near = nearest(p, spots);
     return new PlaceListItem(p.contentId(), p.kind(), p.name(),
         food ? intro.get("firstmenu") : p.category(), image, p.grade(),
-        food ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst());
+        food ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng());
   }
 
   @GetMapping("/api/places/{placeId}")
