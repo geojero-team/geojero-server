@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * 가까운 스팟: 화면 스팟(theme 있음) 중 **배로만 가는 곳을 뺀** 곳까지의 직선거리(TourAPI 좌표). 배로만 가는 곳 —
  * 외도보타니아 · 공곶이·내도 · 지심도(정류장 없이 선착장만) — 은 직선이 바다를 건너 뜻이 없다.
- * 목록 카드는 가장 가까운 한 곳, 상세는 5km 안에서 가까운 순으로 최대 3곳.
+ * 목록 카드는 가장 가까운 한 곳, 상세는 5km 안에서 가까운 순으로 최대 3곳 — 5km 안에 없으면 가장 가까운 한 곳.
  */
 @RestController
 public class PlaceController {
@@ -183,7 +183,10 @@ public class PlaceController {
         detail.put("facilities", intro.get("subfacility"));
       }
     }
-    var near = nearest(p, spots()).stream().filter(s -> s.distanceM() <= NEAR_MAX_M).limit(NEAR_MAX_COUNT).toList();
+    var all = nearest(p, spots());
+    var near = all.stream().filter(s -> s.distanceM() <= NEAR_MAX_M).limit(NEAR_MAX_COUNT).toList();
+    // 5km 안에 없으면 가장 가까운 한 곳(2026-09-19 사용자 — 성포끝집). 카드와 같은 스팟이고, 위치 지도가 그곳까지 담는다.
+    if (near.isEmpty() && !all.isEmpty()) near = List.of(all.get(0));
     return new PlaceDetailRes(p.contentId(), p.kind(), p.name(),
         food ? (info == null ? null : info.intro().get("firstmenu")) : p.category(), p.grade(),
         p.lat(), p.lng(), p.bookingUrl(), near, detail);

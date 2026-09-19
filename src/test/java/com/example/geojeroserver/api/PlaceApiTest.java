@@ -253,6 +253,18 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.nearSpots[*].shortName", contains("거제씨월드", "조선해양문화관", "양지암조각공원")));
   }
 
+  /**
+   * 5km 안에 스팟이 없으면 가장 가까운 한 곳은 둔다(2026-09-19 사용자) — 카드가 말하는 스팟과 같고, 위치 지도가 그곳까지 담아
+   * 섬 어디쯤인지 보인다. 세 곳까지 채우지 않는다 — 그다음은 거제식물원 8.7km · 거제현 관아 10km 라 「가까운」이 아니다.
+   */
+  @Test void 오km_안에_스팟이_없으면_가장_가까운_한_곳만_성포끝집() throws Exception {
+    when(tourApi.placeInfo(any(), any())).thenReturn(null);
+    mvc.perform(get("/api/places/2783397"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.nearSpots[*].shortName", contains("청마기념관")))
+        .andExpect(jsonPath("$.nearSpots[0].distanceM").value(org.hamcrest.Matchers.greaterThan(5000)));
+  }
+
   @Test void 배로만_가는_스팟은_바다_건너_직선이라_가까운스팟에서_빠진다() throws Exception {
     when(tourApi.placeInfo(any(), any())).thenReturn(null);
     // 강성횟집 — 직선으로는 지심도(3.4km)가 5km 안이지만 배로만 간다
