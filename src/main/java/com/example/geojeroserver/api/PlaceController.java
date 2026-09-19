@@ -44,9 +44,11 @@ public class PlaceController {
                                double lat, double lng, String bookingUrl, List<NearSpot> nearSpots,
                                Map<String, Object> detail) {}
 
-  /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서). */
+  /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서).
+   *  coverImage — 목록 사진(카드 · 홈 핀) 대신 쓸 주소(V42 — 대표 사진이 세로인 곳만, TourAPI 추가 사진 중 등록 순 첫 가로 사진). */
   private record Place(long contentId, String kind, String name, double lat, double lng, String category,
-                       Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages) {
+                       Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages,
+                       String coverImage) {
     String contentTypeId() {
       return "FOOD".equals(kind) ? "39" : "32";
     }
@@ -63,7 +65,7 @@ public class PlaceController {
   }
 
   private static final String PLACE_COLUMNS =
-      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls";
+      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, cover_image_url";
 
   private static Place place(java.sql.ResultSet rs) throws java.sql.SQLException {
     Object eng = rs.getObject("eng_content_id");
@@ -72,7 +74,8 @@ public class PlaceController {
         rs.getBigDecimal("lat").doubleValue(), rs.getBigDecimal("lng").doubleValue(),
         rs.getString("category"), rs.getObject("grade", Integer.class), rs.getString("booking_url"),
         eng == null ? null : eng.toString(),
-        fallback == null ? List.of() : List.of((String[]) fallback.getArray()));
+        fallback == null ? List.of() : List.of((String[]) fallback.getArray()),
+        rs.getString("cover_image_url"));
   }
 
   /** TourAPI 사진(대표 + 추가). 0장이면 DB 에 둔 사진 주소(V41). */
@@ -109,7 +112,8 @@ public class PlaceController {
 
   private PlaceListItem listItem(Place p, List<Spot> spots) {
     PlaceInfo info = tourApi.placeInfo(String.valueOf(p.contentId()), p.contentTypeId());
-    String image = info == null ? null : info.firstImage();
+    // 대표 사진이 세로인 곳은 등록 순 첫 가로 사진(V42). TourAPI 가 실패하면 목록 사진도 없다(다른 곳과 같게).
+    String image = info == null ? null : (p.coverImage() != null ? p.coverImage() : info.firstImage());
     // 대표 사진이 없으면 추가 사진 첫 장(한화 — 국문 0장이라 영문, 그것도 0장이면 DB 의 주소). 목록에서 추가 사진을 부르는 건 이 경우뿐이다.
     if (info != null && image == null) {
       var more = images(p, info);

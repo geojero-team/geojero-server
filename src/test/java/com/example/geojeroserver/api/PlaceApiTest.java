@@ -83,6 +83,15 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[0].nearSpot.shortName").value("거제씨월드"));
   }
 
+  @Test void 대표사진이_세로인_어방가는_목록_사진이_등록순_첫_가로사진이다_핀과_카드_칸에_맞게() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("해산물", "연중무휴"));
+    mvc.perform(get("/api/places?kind=FOOD"))
+        .andExpect(jsonPath("$.places[6].name").value("어방가"))
+        .andExpect(jsonPath("$.places[6].imageUrl").value("https://tong.visitkorea.or.kr/cms/resource/04/2778404_image2_1.jpg"))
+        // 다른 곳은 그대로 TourAPI 대표 사진
+        .andExpect(jsonPath("$.places[0].imageUrl").value(IMG));
+  }
+
   @Test void 목록에도_좌표가_있어_홈_지도에_찍는다_관광정보와_무관한_우리_DB_값() throws Exception {
     when(tourApi.placeInfo(any(), any())).thenReturn(null);
     mvc.perform(get("/api/places?kind=STAY"))
