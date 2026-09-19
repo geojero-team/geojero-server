@@ -7,12 +7,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * detailCommon2 · detailImage2 실호출. 공모전 준수: areacode/sigungucode 미사용(상세 조회는
+ * detailCommon2 · detailImage2 · detailIntro2 실호출. 공모전 준수: areacode/sigungucode 미사용(상세 조회는
  * contentId 직접), overview 원문 무수정, KTO 명칭·로고 미노출.
  * 키는 TOUR_INFO_KEY 환경변수(.env)로만.
  *
@@ -74,8 +76,29 @@ public class HttpTourApiGateway implements TourApiGateway {
     for (var it : om.readTree(res.body()).path("response").path("body")
         .path("items").path("item")) {
       out.add(new TourImage(it.path("originimgurl").asText(null),
-          it.path("cpyrhtDivCd").asText(null)));
+          it.path("cpyrhtDivCd").asText(null), it.path("serialnum").asText(null)));
     }
+    return out;
+  }
+
+  /** detailIntro2 — 콘텐츠 종류별 소개 정보. 첫 항목의 글자 필드를 이름 그대로 담는다(가공은 호출자). */
+  @Override
+  public Map<String, String> intro(String service, String contentId, String contentTypeId) throws Exception {
+    String url = "https://apis.data.go.kr/B551011/" + service + "/detailIntro2"
+        + "?serviceKey=" + serviceKey + "&MobileOS=WEB&MobileApp=geojero&_type=json"
+        + "&contentId=" + contentId + "&contentTypeId=" + contentTypeId;
+    HttpResponse<String> res = http.send(
+        HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(4)).GET().build(),
+        HttpResponse.BodyHandlers.ofString());
+    if (res.statusCode() != 200) {
+      throw new IllegalStateException("TourAPI HTTP " + res.statusCode());
+    }
+    var item = om.readTree(res.body()).path("response").path("body")
+        .path("items").path("item").path(0);
+    Map<String, String> out = new LinkedHashMap<>();
+    item.fields().forEachRemaining(f -> {
+      if (f.getValue().isValueNode()) out.put(f.getKey(), f.getValue().asText());
+    });
     return out;
   }
 }

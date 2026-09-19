@@ -1,6 +1,7 @@
 package com.example.geojeroserver.tour;
 
 import java.util.List;
+import java.util.Map;
 
 /** TourAPI HTTP 계층 추상 — 테스트에서 목킹하는 유일한 지점. 실패는 예외로. */
 public interface TourApiGateway {
@@ -20,8 +21,15 @@ public interface TourApiGateway {
     }
   }
 
-  /** 추가 사진 한 장. cpyrhtDivCd는 이미지 단위 저작권 구분(Type3 = 제3자, 사용 보류). */
-  record TourImage(String url, String cpyrhtDivCd) {}
+  /**
+   * 추가 사진 한 장. cpyrhtDivCd는 이미지 단위 저작권 구분(Type3 = 공공누리 제3유형 — 스팟은 쓰지 않고 맛집 · 숙소는 원본 그대로 쓴다).
+   * serialnum 은 등록 번호(「4057087_1」 — 끝 번호가 등록 순서). 영문 사진을 등록 순으로 놓을 때 쓴다.
+   */
+  record TourImage(String url, String cpyrhtDivCd, String serialnum) {
+    public TourImage(String url, String cpyrhtDivCd) {
+      this(url, cpyrhtDivCd, null);
+    }
+  }
 
   TourDetail fetch(String service, String contentId) throws Exception;
 
@@ -39,5 +47,13 @@ public interface TourApiGateway {
    */
   default List<TourImage> images(String service, String contentId) throws Exception {
     return List.of();
+  }
+
+  /**
+   * 소개 정보(detailIntro2) — 맛집(39) 영업시간 · 쉬는 날 · 대표 메뉴, 숙소(32) 체크인 · 체크아웃 · 부대시설 등.
+   * 필드 이름 그대로의 원문 문자열 지도. 별개 오퍼레이션이라 호출이 한 건 더 든다. default 빈 지도 — 함수형 인터페이스를 지킨다.
+   */
+  default Map<String, String> intro(String service, String contentId, String contentTypeId) throws Exception {
+    return Map.of();
   }
 }

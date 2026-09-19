@@ -153,6 +153,112 @@ public class TourApiClient {
     }
   }
 
+  // ── 맛집 · 숙소 (2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」) ─────────────────────────────
+
+  /**
+   * 맛집 · 숙소 한 곳의 TourAPI 정보. 글자는 {@link #clean} 을 거친다(줄바꿈 태그 → 줄바꿈, 엔티티 풀기 — 글 자체는 그대로).
+   * intro 는 detailIntro2 필드 이름 그대로(opentimefood · restdatefood · firstmenu · checkintime · checkouttime · subfacility …),
+   * 빈 값은 담지 않는다. firstImage 는 대표 사진(Type3 도 쓴다), 없으면 null.
+   */
+  public record PlaceInfo(String overview, String address, String firstImage, Map<String, String> intro) {}
+
+  private record PlaceEntry(PlaceInfo info, long at) {}
+
+  private final Map<String, PlaceEntry> placeCache = new ConcurrentHashMap<>();
+
+  /**
+   * detailCommon2 + detailIntro2 — 호출 두 건, 24h 캐시. 실패 · 한도 · 키 없음은 null 이다(호출부가 FALLBACK 을 그린다).
+   * 스팟의 detail() 과 다르게 **Type3 대표 사진도 쓴다** — 공공누리 제3유형(출처표시 + 변경금지)은 원본 그대로면 쓸 수 있고
+   * 맛집 · 숙소 화면은 사진을 자르지 않는다(기준문서 §7, 2026-09-19). 소개 정보를 못 받아도 공통 정보가 있으면 그것만으로 준다.
+   */
+  public PlaceInfo placeInfo(String contentId, String contentTypeId) {
+    if (contentId == null || contentId.isBlank() || !gateway.isConfigured()) return null;
+    String key = "PLACE:" + contentId;
+    var hit = placeCache.get(key);
+    if (hit != null && System.currentTimeMillis() - hit.at() < TTL_MS) return hit.info();
+    if (!counter.tryAcquire()) return null;
+    try {
+      var d = gateway.fetch("KorService2", contentId);
+      if (d == null) return null;
+      Map<String, String> intro = new LinkedHashMap<>();
+      if (counter.tryAcquire()) {
+        try {
+          gateway.intro("KorService2", contentId, contentTypeId).forEach((k, v) -> {
+            String c = clean(v);
+            if (c != null) intro.put(k, c);
+          });
+        } catch (Exception ignored) {
+          // 소개 정보만 못 받았다 — 공통 정보(주소 · 사진 · 소개문)는 그대로 낸다
+        }
+      }
+      String first = d.imageUrl();
+      var info = new PlaceInfo(clean(d.overview()), clean(d.addr1()),
+          first == null || first.isBlank() ? null : https(first), Map.copyOf(intro));
+      placeCache.put(key, new PlaceEntry(info, System.currentTimeMillis()));
+      return info;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  /**
+   * 맛집 · 숙소의 추가 사진(detailImage2) — Type3 도 쓴다(위와 같은 이유). 국문이 0장이고 영문 contentId 가 있으면
+   * 영문 사진을 **등록 순(serialnum 끝 번호)** 으로 쓴다 — 한화리조트 거제 벨버디어(3445089): 영문 API 는 「로얄」을 먼저 주지만
+   * 사용자가 대표로 고른 「스위트 오션뷰」가 _1 이다. 실패 · 한도는 빈 목록 — 사진이 없다고 상세가 죽지 않는다.
+   */
+  public List<String> placeImages(String contentId, String engContentId) {
+    if (contentId == null || contentId.isBlank() || !gateway.isConfigured()) return List.of();
+    String key = "PLACEIMG:" + contentId;
+    var hit = imageCache.get(key);
+    if (hit != null && System.currentTimeMillis() - hit.at() < TTL_MS) return hit.urls();
+    if (!counter.tryAcquire()) return List.of();
+    try {
+      List<String> urls = new ArrayList<>();
+      for (var im : gateway.images("KorService2", contentId)) addImage(urls, im);
+      if (urls.isEmpty() && engContentId != null && !engContentId.isBlank() && counter.tryAcquire()) {
+        var eng = new ArrayList<>(gateway.images("EngService2", engContentId));
+        eng.sort(java.util.Comparator.comparingInt(TourApiClient::serialOrder));
+        for (var im : eng) addImage(urls, im);
+      }
+      var frozen = List.copyOf(urls);
+      imageCache.put(key, new ImageEntry(frozen, System.currentTimeMillis()));
+      return frozen;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
+  private static void addImage(List<String> urls, TourApiGateway.TourImage im) {
+    if (im.url() == null || im.url().isBlank()) return;
+    String u = https(im.url());
+    if (!urls.contains(u)) urls.add(u);
+  }
+
+  /** 「4057087_1」 → 1. 못 읽으면 맨 뒤. */
+  private static int serialOrder(TourApiGateway.TourImage im) {
+    String s = im.serialnum();
+    if (s == null) return Integer.MAX_VALUE;
+    int at = s.lastIndexOf('_');
+    try {
+      return Integer.parseInt(s.substring(at + 1));
+    } catch (NumberFormatException e) {
+      return Integer.MAX_VALUE;
+    }
+  }
+
+  /**
+   * TourAPI 글자 정리 — 줄바꿈 태그(br)를 줄바꿈으로, 나머지 태그는 빼고, HTML 엔티티(&amp;amp; 등)를 풀고, 줄마다 앞뒤 공백을 걷는다.
+   * 글 자체(낱말 · 순서)는 바꾸지 않는다(원문 무수정). 비면 null.
+   */
+  public static String clean(String raw) {
+    if (raw == null) return null;
+    String s = raw.replaceAll("(?i)<br\\s*/?>", "\n").replaceAll("<[^>]+>", "");
+    s = org.springframework.web.util.HtmlUtils.htmlUnescape(s);
+    String joined = s.lines().map(String::strip).filter(line -> !line.isEmpty())
+        .collect(java.util.stream.Collectors.joining("\n"));
+    return joined.isEmpty() ? null : joined;
+  }
+
   private static String https(String url) {
     return url != null && url.startsWith("http://") ? "https://" + url.substring(7) : url;
   }
