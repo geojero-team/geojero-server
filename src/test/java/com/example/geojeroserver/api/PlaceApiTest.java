@@ -91,7 +91,7 @@ class PlaceApiTest {
     mvc.perform(get("/api/places/129479")).andExpect(status().isNotFound());
   }
 
-  @Test void 맛집_상세는_주소_사진_소개_영업시간_쉬는날과_가까운스팟() throws Exception {
+  @Test void 맛집_상세는_주소_사진_영업시간_쉬는날과_가까운스팟() throws Exception {
     when(tourApi.placeInfo("2858010", "39")).thenReturn(food("멸치쌈밥정식 A코스", "매월 두번째·네번째 수요일"));
     when(tourApi.placeImages("2858010", null)).thenReturn(List.of(IMG, "https://tong.visitkorea.or.kr/cms/resource/00/second.jpg"));
     mvc.perform(get("/api/places/2858010"))
@@ -104,7 +104,8 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.detail.address").value("경상남도 거제시 일운면 지세포해안로 12"))
         // 대표 사진이 첫 장 · 추가 사진과 겹치면 한 번만
         .andExpect(jsonPath("$.detail.images", contains(IMG, "https://tong.visitkorea.or.kr/cms/resource/00/second.jpg")))
-        .andExpect(jsonPath("$.detail.overview").value("멸치쌈밥 원문 소개"))
+        // 소개문은 싣지 않는다 — 네이버 · 카카오도 첫 화면에 긴 소개글을 두지 않는다(2026-09-19 사용자)
+        .andExpect(jsonPath("$.detail.overview").doesNotExist())
         .andExpect(jsonPath("$.detail.openTime").value("10:30~20:30\n준비시간 15:00~17:00"))
         .andExpect(jsonPath("$.detail.restDay").value("매월 두번째·네번째 수요일"))
         // 5km 안에서 가까운 순 — 배로만 가는 공곶이·내도(4.7km)는 빠진다

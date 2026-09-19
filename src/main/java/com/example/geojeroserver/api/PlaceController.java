@@ -138,9 +138,9 @@ public class PlaceController {
       detail.put("source", "TourAPI");
       detail.put("address", info.address());
       detail.put("images", images);
+      // 소개문(overview)은 싣지 않는다 — 숙소는 호텔 자기 홍보 글이고, 맛집은 네이버 · 카카오도 첫 화면에 긴 소개글을
+      // 두지 않는다(원문을 고칠 수 없어 요약도 못 한다, 2026-09-19 사용자)
       if (food) {
-        // 맛집 소개문은 음식 설명이라 싣는다. 숙소 소개문은 호텔 자기 홍보 글이라 싣지 않는다(2026-09-19 사용자)
-        detail.put("overview", info.overview());
         detail.put("openTime", intro.get("opentimefood"));
         detail.put("restDay", intro.get("restdatefood"));
       } else {
