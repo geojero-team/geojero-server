@@ -43,8 +43,9 @@ public class PlaceController {
                                double lat, double lng, String bookingUrl, List<NearSpot> nearSpots,
                                Map<String, Object> detail) {}
 
+  /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서). */
   private record Place(long contentId, String kind, String name, double lat, double lng, String category,
-                       Integer grade, String bookingUrl, String engContentId) {
+                       Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages) {
     String contentTypeId() {
       return "FOOD".equals(kind) ? "39" : "32";
     }
@@ -61,14 +62,26 @@ public class PlaceController {
   }
 
   private static final String PLACE_COLUMNS =
-      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id";
+      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls";
 
   private static Place place(java.sql.ResultSet rs) throws java.sql.SQLException {
     Object eng = rs.getObject("eng_content_id");
+    java.sql.Array fallback = rs.getArray("fallback_image_urls");
     return new Place(rs.getLong("content_id"), rs.getString("kind"), rs.getString("name"),
         rs.getBigDecimal("lat").doubleValue(), rs.getBigDecimal("lng").doubleValue(),
         rs.getString("category"), rs.getObject("grade", Integer.class), rs.getString("booking_url"),
-        eng == null ? null : eng.toString());
+        eng == null ? null : eng.toString(),
+        fallback == null ? List.of() : List.of((String[]) fallback.getArray()));
+  }
+
+  /** TourAPI 사진(대표 + 추가). 0장이면 DB 에 둔 사진 주소(V41). */
+  private List<String> images(Place p, PlaceInfo info) {
+    List<String> images = new ArrayList<>();
+    if (info.firstImage() != null) images.add(info.firstImage());
+    for (String u : tourApi.placeImages(String.valueOf(p.contentId()), p.engContentId())) {
+      if (!images.contains(u)) images.add(u);
+    }
+    return images.isEmpty() ? p.fallbackImages() : images;
   }
 
   @GetMapping("/api/places")
@@ -96,9 +109,9 @@ public class PlaceController {
   private PlaceListItem listItem(Place p, List<Spot> spots) {
     PlaceInfo info = tourApi.placeInfo(String.valueOf(p.contentId()), p.contentTypeId());
     String image = info == null ? null : info.firstImage();
-    // 대표 사진이 없으면 추가 사진 첫 장(한화 — 국문 0장이라 영문). 목록에서 추가 사진을 부르는 건 이 경우뿐이다.
+    // 대표 사진이 없으면 추가 사진 첫 장(한화 — 국문 0장이라 영문, 그것도 0장이면 DB 의 주소). 목록에서 추가 사진을 부르는 건 이 경우뿐이다.
     if (info != null && image == null) {
-      var more = tourApi.placeImages(String.valueOf(p.contentId()), p.engContentId());
+      var more = images(p, info);
       image = more.isEmpty() ? null : more.getFirst();
     }
     return listItem(p, info, image, spots);
@@ -129,15 +142,10 @@ public class PlaceController {
       detail.put("reason", "관광정보 확인 실패");
       detail.put("checkedAt", Instant.now().toString());
     } else {
-      List<String> images = new ArrayList<>();
-      if (info.firstImage() != null) images.add(info.firstImage());
-      for (String u : tourApi.placeImages(String.valueOf(p.contentId()), p.engContentId())) {
-        if (!images.contains(u)) images.add(u);
-      }
       Map<String, String> intro = info.intro();
       detail.put("source", "TourAPI");
       detail.put("address", info.address());
-      detail.put("images", images);
+      detail.put("images", images(p, info));
       // 소개문(overview)은 싣지 않는다 — 숙소는 호텔 자기 홍보 글이고, 맛집은 네이버 · 카카오도 첫 화면에 긴 소개글을
       // 두지 않는다(원문을 고칠 수 없어 요약도 못 한다, 2026-09-19 사용자)
       if (food) {

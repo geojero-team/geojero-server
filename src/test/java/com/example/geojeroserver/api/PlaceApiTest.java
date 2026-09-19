@@ -140,6 +140,22 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[1].imageUrl").value("https://tong.visitkorea.or.kr/87.jpg"));
   }
 
+  /**
+   * 운영 서버 키로는 영문 사진이 0장이다(2026-09-19 — 운영 키에 영문 관광정보 활용신청이 없는 것으로 보인다. 사용자 키로는 2장).
+   * 그래서 한화만 영문 TourAPI 사진 주소 2개를 DB 에 두고(V41), TourAPI 가 0장을 주면 그것을 쓴다. 사진 파일은 그대로 TourAPI 사진 서버에서 온다.
+   */
+  @Test void TourAPI가_사진을_0장_주면_DB에_둔_사진_주소를_쓴다_한화() throws Exception {
+    when(tourApi.placeInfo("2660777", "32")).thenReturn(new PlaceInfo(null, "경상남도 거제시 장목면 거제북로 2501-40", null, Map.of()));
+    when(tourApi.placeImages("2660777", "3445089")).thenReturn(List.of());
+    mvc.perform(get("/api/places/2660777"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.detail.images", contains(
+            "https://tong.visitkorea.or.kr/cms/resource/87/4057087_image2_1.jpg",
+            "https://tong.visitkorea.or.kr/cms/resource/76/4057076_image2_1.jpg")));
+    mvc.perform(get("/api/places?kind=STAY"))
+        .andExpect(jsonPath("$.places[1].imageUrl").value("https://tong.visitkorea.or.kr/cms/resource/87/4057087_image2_1.jpg"));
+  }
+
   @Test void 관광정보를_못받으면_FALLBACK_이유와_시각_가까운스팟과_예약은_남는다() throws Exception {
     when(tourApi.placeInfo(any(), any())).thenReturn(null);
     mvc.perform(get("/api/places/976736"))
