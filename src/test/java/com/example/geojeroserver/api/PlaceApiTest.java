@@ -36,7 +36,8 @@ class PlaceApiTest {
 
   private static PlaceInfo food(String menu, String restDay) {
     return new PlaceInfo("멸치쌈밥 원문 소개", "경상남도 거제시 일운면 지세포해안로 12", IMG,
-        Map.of("firstmenu", menu, "restdatefood", restDay, "opentimefood", "10:30~20:30\n준비시간 15:00~17:00"));
+        Map.of("firstmenu", menu, "restdatefood", restDay, "opentimefood", "10:30~20:30\n준비시간 15:00~17:00",
+            "treatmenu", "멸치쌈밥정식 B코스 / 멸치회무침 등"));
   }
 
   private static PlaceInfo stay() {
@@ -107,6 +108,8 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.detail.overview").value("멸치쌈밥 원문 소개"))
         .andExpect(jsonPath("$.detail.openTime").value("10:30~20:30\n준비시간 15:00~17:00"))
         .andExpect(jsonPath("$.detail.restDay").value("매월 두번째·네번째 수요일"))
+        // 취급 메뉴(detailIntro2 treatmenu) — 12곳 모두 있다. 가격은 TourAPI 에 없다(2026-09-19 조회)
+        .andExpect(jsonPath("$.detail.menus").value("멸치쌈밥정식 B코스 / 멸치회무침 등"))
         // 5km 안에서 가까운 순 — 배로만 가는 공곶이·내도(4.7km)는 빠진다
         .andExpect(jsonPath("$.nearSpots[*].shortName", contains("조선해양문화관", "거제씨월드")))
         .andExpect(jsonPath("$.nearSpots[0].distanceM").isNumber())
