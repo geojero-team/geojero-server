@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 맛집 12 · 숙소 7 (V40, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). 화면은 스팟 탭의 「맛집」 「숙소」 칩과 `/places/:placeId`.
+ * 맛집 13 · 숙소 7 (V40 · V43, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). 화면은 스팟 탭의 「맛집」 「숙소」 칩과 `/places/:placeId`.
  *
  * 우리 DB 에는 고른 곳 · 순서 · 등급 · 예약 주소만 있고, 소개 · 사진 · 영업시간 · 체크인은 TourAPI 런타임 호출이다(24h 캐시 —
  * 스팟과 같은 방식, 로컬 저장 안 함). TourAPI 가 실패해도 목록 · 상세는 이름 · 종류 · 가까운 스팟 · 예약 주소로 선다(detail FALLBACK).
@@ -45,10 +45,11 @@ public class PlaceController {
                                Map<String, Object> detail) {}
 
   /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서).
-   *  coverImage — 목록 사진(카드 · 홈 핀) 대신 쓸 주소(V42 — 대표 사진이 세로인 곳만, TourAPI 추가 사진 중 등록 순 첫 가로 사진). */
+   *  coverImage — 목록 사진(카드 · 홈 핀) 대신 쓸 주소(V42 — 대표 사진이 세로인 곳 · V43 — 맛집은 첫 음식 사진).
+   *  foodImages — 맛집 상세에서 앞에 둘 음식 사진 주소(V43, 등록 순). TourAPI 가 지금 주는 사진만 순서를 바꾼다. */
   private record Place(long contentId, String kind, String name, double lat, double lng, String category,
                        Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages,
-                       String coverImage) {
+                       String coverImage, List<String> foodImages) {
     String contentTypeId() {
       return "FOOD".equals(kind) ? "39" : "32";
     }
@@ -65,27 +66,47 @@ public class PlaceController {
   }
 
   private static final String PLACE_COLUMNS =
-      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, cover_image_url";
+      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, cover_image_url, food_image_urls";
 
   private static Place place(java.sql.ResultSet rs) throws java.sql.SQLException {
     Object eng = rs.getObject("eng_content_id");
     java.sql.Array fallback = rs.getArray("fallback_image_urls");
+    java.sql.Array food = rs.getArray("food_image_urls");
     return new Place(rs.getLong("content_id"), rs.getString("kind"), rs.getString("name"),
         rs.getBigDecimal("lat").doubleValue(), rs.getBigDecimal("lng").doubleValue(),
         rs.getString("category"), rs.getObject("grade", Integer.class), rs.getString("booking_url"),
         eng == null ? null : eng.toString(),
         fallback == null ? List.of() : List.of((String[]) fallback.getArray()),
-        rs.getString("cover_image_url"));
+        rs.getString("cover_image_url"),
+        food == null ? List.of() : List.of((String[]) food.getArray()));
   }
 
-  /** TourAPI 사진(대표 + 추가). 0장이면 DB 에 둔 사진 주소(V41). */
+  /**
+   * TourAPI 사진(대표 + 추가, 맛집은 메뉴 사진까지). 0장이면 DB 에 둔 사진 주소(V41).
+   * 맛집은 음식 사진을 앞으로(V43 — 2026-09-19 사용자 「음식점이니 음식 사진이 대부분 차지했으면」). 대표 사진은 대개 가게 외관이다.
+   * 순서만 바꾼다 — DB 에 적힌 음식 사진이라도 TourAPI 가 지금 주지 않으면 내보내지 않는다.
+   */
   private List<String> images(Place p, PlaceInfo info) {
     List<String> images = new ArrayList<>();
     if (info.firstImage() != null) images.add(info.firstImage());
-    for (String u : tourApi.placeImages(String.valueOf(p.contentId()), p.engContentId())) {
+    String id = String.valueOf(p.contentId());
+    for (String u : tourApi.placeImages(id, p.engContentId())) {
       if (!images.contains(u)) images.add(u);
     }
-    return images.isEmpty() ? p.fallbackImages() : images;
+    if ("FOOD".equals(p.kind())) {
+      for (String u : tourApi.placeMenuImages(id)) {
+        if (!images.contains(u)) images.add(u);
+      }
+    }
+    if (images.isEmpty()) return p.fallbackImages();
+    List<String> ordered = new ArrayList<>();
+    for (String u : p.foodImages()) {
+      if (images.contains(u)) ordered.add(u);
+    }
+    for (String u : images) {
+      if (!ordered.contains(u)) ordered.add(u);
+    }
+    return ordered;
   }
 
   @GetMapping("/api/places")

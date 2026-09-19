@@ -113,6 +113,31 @@ class TourApiPlaceTest {
     assertEquals(List.of("https://tong.visitkorea.or.kr/1.jpg"), client.placeImages("2578495", "999"));
   }
 
+  /** 음식점 메뉴 사진(detailImage2 imageYN=N) — 등록 순(serialnum 끝 번호)으로, Type3 도 쓴다. 백만석은 음식 사진이 이 칸에만 있다. */
+  @Test void 메뉴_사진은_등록순으로_받는다() {
+    List<String> asked = new ArrayList<>();
+    var client = new TourApiClient(new TourApiGateway() {
+      @Override public TourDetail fetch(String service, String id) { return new TourDetail("개요", null); }
+      @Override public List<TourImage> menuImages(String service, String id) {
+        asked.add(service + ":" + id);
+        return List.of(new TourImage("http://tong.visitkorea.or.kr/m3.JPG", "Type3", "3043327_3"),
+            new TourImage("http://tong.visitkorea.or.kr/m1.JPG", "Type3", "3043329_1"),
+            new TourImage("http://tong.visitkorea.or.kr/m2.JPG", "Type3", "3043328_2"));
+      }
+    }, () -> true);
+    assertEquals(List.of("https://tong.visitkorea.or.kr/m1.JPG", "https://tong.visitkorea.or.kr/m2.JPG", "https://tong.visitkorea.or.kr/m3.JPG"),
+        client.placeMenuImages("578976"));
+    assertEquals(List.of("KorService2:578976"), asked);
+  }
+
+  @Test void 메뉴_사진_실패는_빈목록() {
+    var client = new TourApiClient(new TourApiGateway() {
+      @Override public TourDetail fetch(String service, String id) { return new TourDetail("개요", null); }
+      @Override public List<TourImage> menuImages(String service, String id) { throw new IllegalStateException("HTTP 500"); }
+    }, () -> true);
+    assertEquals(List.of(), client.placeMenuImages("578976"));
+  }
+
   @Test void 사진_실패는_빈목록() {
     var client = new TourApiClient(new TourApiGateway() {
       @Override public TourDetail fetch(String service, String id) { return new TourDetail("개요", null); }

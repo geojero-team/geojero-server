@@ -6,6 +6,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -23,7 +25,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * 맛집 12 · 숙소 7 (V40, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
+ * 맛집 13 · 숙소 7 (V40 · V43, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
  * 가까운 스팟은 진짜 pois(V1~)로 잰다 — 거리 · 제외 규칙이 실제 데이터에서 맞는지 본다.
  */
 @SpringBootTest
@@ -33,6 +35,11 @@ class PlaceApiTest {
   @MockitoBean TourApiClient tourApi;
 
   private static final String IMG = "https://tong.visitkorea.or.kr/cms/resource/00/first.jpg";
+
+  /** TourAPI 사진 주소 — 「62/2787162」 → https://tong.visitkorea.or.kr/cms/resource/62/2787162_image2_1.jpg */
+  private static String tong(String path) {
+    return "https://tong.visitkorea.or.kr/cms/resource/" + path + "_image2_1.jpg";
+  }
 
   private static PlaceInfo food(String menu, String restDay) {
     return new PlaceInfo("멸치쌈밥 원문 소개", "경상남도 거제시 일운면 지세포해안로 12", IMG,
@@ -44,20 +51,25 @@ class PlaceApiTest {
         Map.of("checkintime", "15:00", "checkouttime", "11:00", "subfacility", "사우나 / 산책로 / 노래방"));
   }
 
-  @Test void 맛집_목록은_T맵_인기순_12곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
+  @Test void 맛집_목록은_T맵_인기순_13곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("문어해물칼국수", "연중무휴"));
     mvc.perform(get("/api/places?kind=FOOD"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(12))
+        .andExpect(jsonPath("$.places.length()").value(13))
         .andExpect(jsonPath("$.places[0].placeId").value(2783696))
         .andExpect(jsonPath("$.places[0].kind").value("FOOD"))
         .andExpect(jsonPath("$.places[0].name").value("대박난맛집"))
         .andExpect(jsonPath("$.places[0].category").value("문어해물칼국수"))
         .andExpect(jsonPath("$.places[0].restDay").value("연중무휴"))
-        .andExpect(jsonPath("$.places[0].imageUrl").value(IMG))
+        .andExpect(jsonPath("$.places[0].imageUrl").value(tong("62/2787162")))
         .andExpect(jsonPath("$.places[0].grade").doesNotExist())
         .andExpect(jsonPath("$.places[0].nearSpot.shortName").value("학동몽돌해변"))
-        .andExpect(jsonPath("$.places[11].name").value("장수굴국밥"));
+        .andExpect(jsonPath("$.places[11].name").value("장수굴국밥"))
+        // 2026-09-19 사용자 — 점순이네밥집(음식 사진 0장)은 두고, T맵 인기순에서 음식 사진이 있는 다음 곳을 더했다
+        .andExpect(jsonPath("$.places[12].placeId").value(2783397))
+        .andExpect(jsonPath("$.places[12].name").value("성포끝집"))
+        .andExpect(jsonPath("$.places[12].lat").value(34.9224143))
+        .andExpect(jsonPath("$.places[12].lng").value(128.5256862));
   }
 
   @Test void 숙소_목록은_7곳이고_종류는_우리가_가진_등급_값이다() throws Exception {
@@ -83,13 +95,23 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[0].nearSpot.shortName").value("거제씨월드"));
   }
 
-  @Test void 대표사진이_세로인_어방가는_목록_사진이_등록순_첫_가로사진이다_핀과_카드_칸에_맞게() throws Exception {
+  /**
+   * 맛집 목록 사진(카드 · 홈 지도 핀)은 **첫 음식 사진**이다(2026-09-19 사용자 — 「음식점이니 음식 사진이 대부분 차지했으면」).
+   * 대표 사진은 대개 가게 외관이다. 음식 사진은 TourAPI 추가 사진 · 메뉴 사진 중 등록 순 첫 장(V43).
+   */
+  @Test void 맛집_목록_사진은_첫_음식_사진이다_없으면_대표사진() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("해산물", "연중무휴"));
     mvc.perform(get("/api/places?kind=FOOD"))
+        // 어방가 — V42 의 첫 가로 사진(가게 안)이 아니라 첫 음식 사진
         .andExpect(jsonPath("$.places[6].name").value("어방가"))
-        .andExpect(jsonPath("$.places[6].imageUrl").value("https://tong.visitkorea.or.kr/cms/resource/04/2778404_image2_1.jpg"))
-        // 다른 곳은 그대로 TourAPI 대표 사진
-        .andExpect(jsonPath("$.places[0].imageUrl").value(IMG));
+        .andExpect(jsonPath("$.places[6].imageUrl").value(tong("06/2778406")))
+        // 백만석 — 음식 사진은 메뉴 사진(imageYN=N) 칸에만 있다
+        .andExpect(jsonPath("$.places[9].imageUrl").value("https://tong.visitkorea.or.kr/cms/resource/29/3043329_image2_1.JPG"))
+        // 점순이네밥집 — TourAPI 에 음식 사진이 없어 대표 사진 그대로
+        .andExpect(jsonPath("$.places[5].name").value("점순이네밥집"))
+        .andExpect(jsonPath("$.places[5].imageUrl").value(IMG))
+        // 초정명가 — 대표 사진이 이미 음식이라 그대로
+        .andExpect(jsonPath("$.places[10].imageUrl").value(IMG));
   }
 
   @Test void 목록에도_좌표가_있어_홈_지도에_찍는다_관광정보와_무관한_우리_DB_값() throws Exception {
@@ -147,6 +169,50 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.detail.facilities").value("사우나 / 산책로 / 노래방"))
         .andExpect(jsonPath("$.detail.overview").doesNotExist())
         .andExpect(jsonPath("$.detail.images", contains(IMG)));
+    // 메뉴 사진(imageYN=N)은 음식점 칸이다 — 숙소는 부르지 않는다
+    verify(tourApi, never()).placeMenuImages(any());
+  }
+
+  /** 맛집 상세 사진은 음식 사진이 먼저(등록 순), 그다음 대표 사진과 나머지(TourAPI 순서) — 2026-09-19 사용자. */
+  @Test void 맛집_상세_사진은_음식_사진이_먼저다() throws Exception {
+    String front = tong("67/2787167");
+    String inside = tong("65/2787165");
+    when(tourApi.placeInfo("2783696", "39")).thenReturn(new PlaceInfo(null, "경상남도 거제시 동부면 거제대로 910", front, Map.of()));
+    // TourAPI 가 주는 순서 그대로 — 등록 번호 _2 · _3 · _1 · _4
+    when(tourApi.placeImages("2783696", null)).thenReturn(List.of(tong("57/2787157"), tong("60/2787160"), tong("62/2787162"), inside));
+    mvc.perform(get("/api/places/2783696"))
+        .andExpect(jsonPath("$.detail.images", contains(tong("62/2787162"), tong("57/2787157"), tong("60/2787160"), front, inside)));
+  }
+
+  /** TourAPI 가 지금 주지 않는 사진은 DB 에 적혀 있어도 내보내지 않는다 — 순서만 정하는 칸이다. */
+  @Test void 음식_사진이라도_TourAPI가_주지_않으면_빠진다() throws Exception {
+    String front = tong("67/2787167");
+    when(tourApi.placeInfo("2783696", "39")).thenReturn(new PlaceInfo(null, null, front, Map.of()));
+    when(tourApi.placeImages("2783696", null)).thenReturn(List.of(tong("57/2787157")));
+    mvc.perform(get("/api/places/2783696"))
+        .andExpect(jsonPath("$.detail.images", contains(tong("57/2787157"), front)));
+  }
+
+  /** 백만석은 음식 사진이 메뉴 사진(detailImage2 imageYN=N) 칸에만 있다 — 맛집은 그 칸도 받는다. */
+  @Test void 맛집은_메뉴_사진도_받아_음식_사진으로_앞에_둔다_백만석() throws Exception {
+    String front = "https://tong.visitkorea.or.kr/cms/resource/24/3043324_image2_1.JPG";
+    String sign = "https://tong.visitkorea.or.kr/cms/resource/17/3043317_image2_1.JPG";
+    String m1 = "https://tong.visitkorea.or.kr/cms/resource/29/3043329_image2_1.JPG";
+    String m2 = "https://tong.visitkorea.or.kr/cms/resource/28/3043328_image2_1.JPG";
+    String m3 = "https://tong.visitkorea.or.kr/cms/resource/27/3043327_image2_1.JPG";
+    when(tourApi.placeInfo("578976", "39")).thenReturn(new PlaceInfo(null, "경상남도 거제시 계룡로 47", front, Map.of()));
+    when(tourApi.placeImages("578976", null)).thenReturn(List.of(sign));
+    when(tourApi.placeMenuImages("578976")).thenReturn(List.of(m1, m2, m3));
+    mvc.perform(get("/api/places/578976"))
+        .andExpect(jsonPath("$.detail.images", contains(m1, m2, m3, front, sign)));
+  }
+
+  @Test void 음식_사진이_없는_점순이네밥집은_TourAPI_순서_그대로() throws Exception {
+    String front = tong("95/2916395");
+    when(tourApi.placeInfo("2916411", "39")).thenReturn(new PlaceInfo(null, null, front, Map.of()));
+    when(tourApi.placeImages("2916411", null)).thenReturn(List.of(tong("92/2916392"), tong("93/2916393")));
+    mvc.perform(get("/api/places/2916411"))
+        .andExpect(jsonPath("$.detail.images", contains(front, tong("92/2916392"), tong("93/2916393"))));
   }
 
   @Test void 한화는_국문사진이_없어_영문_contentId_로_사진을_받는다() throws Exception {

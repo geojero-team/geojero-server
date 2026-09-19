@@ -63,9 +63,19 @@ public class HttpTourApiGateway implements TourApiGateway {
    */
   @Override
   public List<TourImage> images(String service, String contentId) throws Exception {
+    return detailImages(service, contentId, "Y");
+  }
+
+  /** 음식점 메뉴 사진 — 같은 detailImage2 에 imageYN=N. */
+  @Override
+  public List<TourImage> menuImages(String service, String contentId) throws Exception {
+    return detailImages(service, contentId, "N");
+  }
+
+  private List<TourImage> detailImages(String service, String contentId, String imageYN) throws Exception {
     String url = "https://apis.data.go.kr/B551011/" + service + "/detailImage2"
         + "?serviceKey=" + serviceKey + "&MobileOS=WEB&MobileApp=geojero&_type=json"
-        + "&contentId=" + contentId + "&imageYN=Y&numOfRows=20";
+        + "&contentId=" + contentId + "&imageYN=" + imageYN + "&numOfRows=20";
     HttpResponse<String> res = http.send(
         HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(4)).GET().build(),
         HttpResponse.BodyHandlers.ofString());

@@ -228,6 +228,29 @@ public class TourApiClient {
     }
   }
 
+  /**
+   * 음식점 메뉴 사진(detailImage2 imageYN=N) — **등록 순**(serialnum 끝 번호), Type3 도 쓴다(맛집 · 숙소 사진과 같은 이유).
+   * 백만석은 음식 사진이 이 칸에만 있다(2026-09-19 확인 — 12곳 중 이 칸이 있는 곳은 백만석 하나). 실패 · 한도는 빈 목록.
+   */
+  public List<String> placeMenuImages(String contentId) {
+    if (contentId == null || contentId.isBlank() || !gateway.isConfigured()) return List.of();
+    String key = "PLACEMENU:" + contentId;
+    var hit = imageCache.get(key);
+    if (hit != null && System.currentTimeMillis() - hit.at() < TTL_MS) return hit.urls();
+    if (!counter.tryAcquire()) return List.of();
+    try {
+      var menu = new ArrayList<>(gateway.menuImages("KorService2", contentId));
+      menu.sort(java.util.Comparator.comparingInt(TourApiClient::serialOrder));
+      List<String> urls = new ArrayList<>();
+      for (var im : menu) addImage(urls, im);
+      var frozen = List.copyOf(urls);
+      imageCache.put(key, new ImageEntry(frozen, System.currentTimeMillis()));
+      return frozen;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
   private static void addImage(List<String> urls, TourApiGateway.TourImage im) {
     if (im.url() == null || im.url().isBlank()) return;
     String u = https(im.url());

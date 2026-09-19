@@ -50,6 +50,14 @@ public interface TourApiGateway {
   }
 
   /**
+   * 음식점 메뉴 사진(detailImage2 imageYN=N). 추가 사진과 같은 오퍼레이션을 한 번 더 부른다.
+   * default 빈 목록 — 함수형 인터페이스를 지킨다.
+   */
+  default List<TourImage> menuImages(String service, String contentId) throws Exception {
+    return List.of();
+  }
+
+  /**
    * 소개 정보(detailIntro2) — 맛집(39) 영업시간 · 쉬는 날 · 대표 메뉴, 숙소(32) 체크인 · 체크아웃 · 부대시설 등.
    * 필드 이름 그대로의 원문 문자열 지도. 별개 오퍼레이션이라 호출이 한 건 더 든다. default 빈 지도 — 함수형 인터페이스를 지킨다.
    */
