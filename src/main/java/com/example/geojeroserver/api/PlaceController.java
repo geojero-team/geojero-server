@@ -51,7 +51,13 @@ public class PlaceController {
                        Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages,
                        String coverImage, List<String> foodImages) {
     String contentTypeId() {
-      return "FOOD".equals(kind) ? "39" : "32";
+      return hasMenu() ? "39" : "32";
+    }
+
+    /** 대표 메뉴 · 영업시간 · 쉬는 날이 오는 곳 — 맛집과 카페다. 숙소는 체크인 · 부대시설이 온다.
+     *  카페는 TourAPI 분류가 맛집과 같은 음식점(39)이라 같은 필드를 쓴다(V44, 2026-09-20). */
+    boolean hasMenu() {
+      return "FOOD".equals(kind) || "CAFE".equals(kind);
     }
   }
 
@@ -93,6 +99,8 @@ public class PlaceController {
     for (String u : tourApi.placeImages(id, p.engContentId())) {
       if (!images.contains(u)) images.add(u);
     }
+    // 메뉴 사진 칸(detailImage2 imageYN=N)은 맛집만 받는다 — 백만석은 음식 사진이 거기에만 있다(V43).
+    // 카페는 일곱 곳 모두 0장이라(2026-09-20 실측) 부르면 호출만 는다.
     if ("FOOD".equals(p.kind())) {
       for (String u : tourApi.placeMenuImages(id)) {
         if (!images.contains(u)) images.add(u);
@@ -111,7 +119,9 @@ public class PlaceController {
 
   @GetMapping("/api/places")
   public PlacesRes list(@RequestParam String kind) {
-    if (!"FOOD".equals(kind) && !"STAY".equals(kind)) throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+    if (!"FOOD".equals(kind) && !"STAY".equals(kind) && !"CAFE".equals(kind)) {
+      throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+    }
     var places = jdbc.query("SELECT " + PLACE_COLUMNS + " FROM places WHERE kind = ? ORDER BY sort_order",
         (rs, i) -> place(rs), kind);
     var spots = spots();
@@ -144,12 +154,12 @@ public class PlaceController {
   }
 
   private static PlaceListItem listItem(Place p, PlaceInfo info, String image, List<Spot> spots) {
-    boolean food = "FOOD".equals(p.kind());
+    boolean menu = p.hasMenu();
     Map<String, String> intro = info == null ? Map.of() : info.intro();
     var near = nearest(p, spots);
     return new PlaceListItem(p.contentId(), p.kind(), p.name(),
-        food ? intro.get("firstmenu") : p.category(), image, p.grade(),
-        food ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng());
+        menu ? intro.get("firstmenu") : p.category(), image, p.grade(),
+        menu ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng());
   }
 
   @GetMapping("/api/places/{placeId}")
@@ -158,7 +168,7 @@ public class PlaceController {
         (rs, i) -> place(rs), placeId);
     if (found.isEmpty()) throw new BusinessException(ErrorCode.PLACE_NOT_FOUND);
     Place p = found.getFirst();
-    boolean food = "FOOD".equals(p.kind());
+    boolean menu = p.hasMenu();
 
     PlaceInfo info = tourApi.placeInfo(String.valueOf(p.contentId()), p.contentTypeId());
     Map<String, Object> detail = new LinkedHashMap<>();
@@ -174,7 +184,7 @@ public class PlaceController {
       detail.put("images", images(p, info));
       // 소개문(overview)은 싣지 않는다 — 숙소는 호텔 자기 홍보 글이고, 맛집은 네이버 · 카카오도 첫 화면에 긴 소개글을
       // 두지 않는다(원문을 고칠 수 없어 요약도 못 한다, 2026-09-19 사용자)
-      if (food) {
+      if (menu) {
         detail.put("openTime", intro.get("opentimefood"));
         detail.put("restDay", intro.get("restdatefood"));
       } else {
@@ -188,7 +198,7 @@ public class PlaceController {
     // 5km 안에 없으면 가장 가까운 한 곳(2026-09-19 사용자 — 성포끝집). 카드와 같은 스팟이고, 위치 지도가 그곳까지 담는다.
     if (near.isEmpty() && !all.isEmpty()) near = List.of(all.get(0));
     return new PlaceDetailRes(p.contentId(), p.kind(), p.name(),
-        food ? (info == null ? null : info.intro().get("firstmenu")) : p.category(), p.grade(),
+        menu ? (info == null ? null : info.intro().get("firstmenu")) : p.category(), p.grade(),
         p.lat(), p.lng(), p.bookingUrl(), near, detail);
   }
 

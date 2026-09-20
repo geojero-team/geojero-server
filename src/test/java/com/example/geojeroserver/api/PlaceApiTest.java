@@ -126,7 +126,104 @@ class PlaceApiTest {
   }
 
   @Test void 종류가_틀리면_400() throws Exception {
-    mvc.perform(get("/api/places?kind=CAFE")).andExpect(status().isBadRequest());
+    // CAFE 는 2026-09-20 에 쓰는 종류가 됐다(V44) — 없는 종류로 바꿔 둔다
+    mvc.perform(get("/api/places?kind=SHOP")).andExpect(status().isBadRequest());
+  }
+
+  /**
+   * 카페 7곳(V44, 2026-09-20 사용자 — 팀 의논). 고른 방법은 맛집과 **같다** —
+   * T맵 인기순 → TourAPI 에 있고 사진이 있을 것 → 체인 제외. 우리가 고르지 않는다(기준문서 §6).
+   * TourAPI 분류가 맛집과 같은 음식점(39)이라 카드도 같은 모양이다 — 대표 메뉴 · 쉬는 날 · 사진 · 가까운 스팟.
+   */
+  @Test void 카페_목록은_T맵_인기순_9곳이고_카드는_맛집과_같은_모양이다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("선셋커피", "연중무휴"));
+    mvc.perform(get("/api/places?kind=CAFE"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.places.length()").value(9))
+        .andExpect(jsonPath("$.places[0].placeId").value(2857087))
+        .andExpect(jsonPath("$.places[0].kind").value("CAFE"))
+        .andExpect(jsonPath("$.places[0].name").value("온더선셋"))
+        // category 자리에 대표 메뉴가 온다(숙소의 「2성 호텔」자리) — 맛집과 같은 분기
+        .andExpect(jsonPath("$.places[0].category").value("선셋커피"))
+        .andExpect(jsonPath("$.places[0].restDay").value("연중무휴"))
+        .andExpect(jsonPath("$.places[0].imageUrl").value(IMG))
+        .andExpect(jsonPath("$.places[0].grade").doesNotExist())
+        .andExpect(jsonPath("$.places[0].lat").value(34.9162065))
+        .andExpect(jsonPath("$.places[0].lng").value(128.5197758))
+        .andExpect(jsonPath("$.places[6].name").value("글래씨스"))
+        // 남부권 둘은 인기순 자리 그대로다 — 무지개펜션 39위가 썬트리팜 46위보다 앞이다(V46)
+        .andExpect(jsonPath("$.places[7].placeId").value(3060359))
+        .andExpect(jsonPath("$.places[7].name").value("무지개펜션에스프레소"))
+        .andExpect(jsonPath("$.places[8].placeId").value(2912639))
+        .andExpect(jsonPath("$.places[8].name").value("썬트리팜 카페"));
+  }
+
+  /**
+   * 남부권(바람의언덕 · 해금강 · 학동)에 카페가 한 곳도 없던 것을 채웠다(2026-09-20 사용자).
+   * T맵 남부권 순위 1 · 4 · 6위 카페는 **TourAPI 에 아예 없어** 넣지 못했다 — 원천이 없으면 넣지 않는다.
+   */
+  @Test void 남부권_카페_둘이_남부면_스팟_옆에_있다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("아메리카노", "연중무휴"));
+    mvc.perform(get("/api/places?kind=CAFE"))
+        .andExpect(jsonPath("$.places[7].name").value("무지개펜션에스프레소"))
+        .andExpect(jsonPath("$.places[7].nearSpot.shortName").value("여차홍포해안도로"))
+        // 대표 사진이 통나무집 외관이라 카드가 펜션으로 읽혔다 — 목록 사진만 등록 순 첫 추가 사진으로(V46)
+        .andExpect(jsonPath("$.places[7].imageUrl")
+            .value("https://tong.visitkorea.or.kr/cms/resource/54/3052254_image2_1.JPG"))
+        .andExpect(jsonPath("$.places[8].name").value("썬트리팜 카페"))
+        .andExpect(jsonPath("$.places[8].nearSpot.shortName").value("도장포유람선"));
+  }
+
+  /**
+   * 목록 사진(카드 · 홈 지도 핀)이 **세로**면 지도에서 액자가 길쭉해 다른 핀과 안 맞는다(2026-09-20 사용자).
+   * 맛집 · 숙소에 이미 쓰는 규칙(V42)을 카페에도 쓴다 — 대표가 세로면 등록 순 첫 가로 사진.
+   * 씨야드 · 짹짹커피는 TourAPI · 관광사진 API 어디에도 가로가 없어 그대로 둔다(2026-09-20 실측).
+   */
+  @Test void 엄마의_바다_목록사진은_세로인_대표가_아니라_첫_가로_사진이다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("바다 아이스크림 라떼", "연중무휴"));
+    mvc.perform(get("/api/places?kind=CAFE"))
+        .andExpect(jsonPath("$.places[2].name").value("엄마의 바다"))
+        .andExpect(jsonPath("$.places[2].imageUrl").value(tong("74/3579074")));
+  }
+
+  /**
+   * 카페를 넣은 이유가 이것이다 — 일곱 중 셋이 스팟에서 **걸어서** 간다.
+   * 맛집 13곳은 지세포에 몰려 있어 코스와 떨어져 있었다. 이 거리가 멀어지면 카페를 넣은 근거가 약해진다.
+   */
+  @Test void 카페는_스팟_바로_옆에_있다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("아이스크림 라떼", "연중무휴"));
+    mvc.perform(get("/api/places?kind=CAFE"))
+        .andExpect(jsonPath("$.places[3].name").value("씨야드"))
+        .andExpect(jsonPath("$.places[3].nearSpot.shortName").value("거제식물원"))
+        .andExpect(jsonPath("$.places[4].name").value("짹짹커피 거제도본점"))
+        .andExpect(jsonPath("$.places[4].nearSpot.shortName").value("포로수용소"))
+        .andExpect(jsonPath("$.places[5].name").value("심해"))
+        .andExpect(jsonPath("$.places[5].nearSpot.shortName").value("매미성"));
+  }
+
+  /**
+   * 카페 상세는 **영업시간 · 쉬는 날**이다(숙소의 체크인 · 부대시설이 아니라). 사진은 **TourAPI 순서 그대로** —
+   * 맛집의 「음식 사진 먼저」(V43)를 카페에는 쓰지 않는다(2026-09-20 사용자: 거제 카페는 바다 · 노을이 주인공이다).
+   */
+  @Test void 카페_상세는_영업시간과_쉬는날을_주고_사진은_TourAPI_순서_그대로다() throws Exception {
+    String view = "https://tong.visitkorea.or.kr/cms/resource/00/second.jpg";
+    when(tourApi.placeInfo("2783404", "39")).thenReturn(food("아이스크림 라떼", "연중무휴"));
+    when(tourApi.placeImages("2783404", null)).thenReturn(List.of(IMG, view));
+    mvc.perform(get("/api/places/2783404"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.name").value("심해"))
+        .andExpect(jsonPath("$.kind").value("CAFE"))
+        .andExpect(jsonPath("$.category").value("아이스크림 라떼"))
+        .andExpect(jsonPath("$.grade").doesNotExist())
+        .andExpect(jsonPath("$.bookingUrl").doesNotExist())
+        .andExpect(jsonPath("$.detail.openTime").value("10:30~20:30\n준비시간 15:00~17:00"))
+        .andExpect(jsonPath("$.detail.restDay").value("연중무휴"))
+        .andExpect(jsonPath("$.detail.checkIn").doesNotExist())
+        .andExpect(jsonPath("$.detail.facilities").doesNotExist())
+        .andExpect(jsonPath("$.detail.images").value(contains(IMG, view)))
+        .andExpect(jsonPath("$.nearSpots[0].shortName").value("매미성"));
+    // 메뉴 사진 칸(imageYN=N)은 부르지 않는다 — 카페 일곱 곳 모두 0장이라 호출만 는다
+    verify(tourApi, never()).placeMenuImages(any());
   }
 
   @Test void 없는_곳은_404() throws Exception {
