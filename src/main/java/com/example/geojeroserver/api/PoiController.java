@@ -27,13 +27,25 @@ public class PoiController {
                             String theme, String region, String category, String tier,
                             boolean hasEnglish, Double lat, Double lng, String imageUrl,
                             String alightLabel, String timetableStop, boolean boardStopDiffers,
-                            List<String> ferryDocks, Integer nineScenicNo, String summary) {
+                            List<String> ferryDocks, Integer nineScenicNo, String summary,
+                            WalkTo walkTo) {
     PoiListItem withImageUrl(String url) {
       return new PoiListItem(poiId, name, shortName, kind, theme, region, category, tier,
           hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks,
-          nineScenicNo, summary);
+          nineScenicNo, summary, walkTo);
     }
   }
+
+  /**
+   * 걸어서 갈 수 없는 스팟의 **대신 걸어갈 곳**(V48, 2026-09-20). 걸어갈 수 있는 스팟은 null 이다.
+   *
+   * 해금강은 바다 위 바위섬이라(TourAPI 소개문 "약 500m 해상에 위치한 바위섬") 그 좌표로 도보 길찾기를 걸면
+   * 카카오맵이 길을 못 그리고, 화면의 「도보 약 1.1km」도 바다를 건너는 직선이다. 그래서 화면은 길찾기와
+   * 거리를 이 곳 기준으로 다시 적고 {@code note} 로 이유를 말한다.
+   *
+   * 거리를 주지 않는 이유: 어느 정류장에서 걷는지에 따라 달라진다 — 화면이 두 좌표로 잰다.
+   */
+  public record WalkTo(String name, Double lat, Double lng, String note) {}
 
   /** 이미지를 채우는 데만 쓰는 원본 값. 응답에는 나가지 않는다. */
   private record Row(PoiListItem item, String contentId, boolean imageUseOk, String intro,
@@ -72,6 +84,8 @@ public class PoiController {
                         AND i.matched_by = 'HUMAN') AS has_en,
                p.lat, p.lng, p.tour_content_id, p.image_use_ok, p.intro_text,
                p.photo_keyword, p.alight_label, p.timetable_stop, p.nine_scenic_no,
+               -- 걸어갈 수 없는 스팟의 대신 걸어갈 곳(V48) — 해금강만 차 있다
+               p.walk_to_name, p.walk_to_lat, p.walk_to_lng, p.walk_to_note,
                -- summary(V29, 우리가 쓴 요약)는 목록에도 내려준다 — 스팟 탭의 「크게 보기」가 카드에 쓴다(2026-09-17)
                p.summary,
                -- 배를 타는 선착장: 외도 유람선(ferry_links DESTINATION, seq 순) 뒤에 도선(V31 shuttle_docks)
@@ -87,6 +101,11 @@ public class PoiController {
           String alight = rs.getString("alight_label");
           String stop = rs.getString("timetable_stop");
           String docks = rs.getString("ferry_docks");
+          // 네 칸은 같이 있거나 같이 없다(V48 CHECK). 이름만 보고 가른다.
+          String walkName = rs.getString("walk_to_name");
+          WalkTo walkTo = walkName == null ? null
+              : new WalkTo(walkName, toDouble(rs.getBigDecimal("walk_to_lat")),
+                  toDouble(rs.getBigDecimal("walk_to_lng")), rs.getString("walk_to_note"));
           return new Row(
               new PoiListItem(rs.getLong("poi_id"), rs.getString("poi_name"),
                   rs.getString("short_name"), rs.getString("poi_kind"), rs.getString("theme"),
@@ -95,7 +114,7 @@ public class PoiController {
                   toDouble(rs.getBigDecimal("lng")), null,
                   alight, stop, SpotTimetableController.alightDiffers(stop, alight),
                   docks == null ? List.of() : List.of(docks.split("·")),
-                  rs.getObject("nine_scenic_no", Integer.class), rs.getString("summary")),
+                  rs.getObject("nine_scenic_no", Integer.class), rs.getString("summary"), walkTo),
               rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
               rs.getString("intro_text"), rs.getString("photo_keyword"));
         });

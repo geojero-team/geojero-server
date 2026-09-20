@@ -120,6 +120,36 @@ class ContractTest {
   }
 
   /**
+   * 걸어서 갈 수 없는 스팟은 **대신 걸어갈 곳**을 준다 (V48, 2026-09-20 사용자 결정).
+   *
+   * 해금강은 육지가 아니라 바다 위 바위섬이다 — TourAPI 소개문이 *"갈개마을의 남쪽 약 500m
+   * 해상에 위치한 바위섬"*이라고 적는다. 그래서 그 좌표로 도보 길찾기를 걸면 카카오맵이
+   * 「도보 길찾기를 이용할 수 없는 지역이에요」로 답하고, 화면의 「도보 약 1.1km」는 **바다를
+   * 건너는 직선**이다. 우리가 §4에서 비판한 '할 수 없는 것을 할 수 있는 것처럼 말하기'다.
+   *
+   * 대신 걸어갈 곳은 우리가 지어낸 곳이 아니다 — TourAPI 「거제 우제봉전망대」(2704694)이고
+   * 그 소개문이 *"우제봉전망대에 오르면 해금강의 천혜의 비경을 … 망원경이 있어 해금강 일대를
+   * 자세하게 관람할 수 있다"*라고 적는다(절대규칙 1·5).
+   *
+   * 거리는 여기서 주지 않는다 — 어느 정류장에서 걷는지에 따라 달라지므로 화면이 두 좌표로 잰다
+   * (스팟 ↔ 스팟 걷기와 같은 방식, 디자인브리프 부록 H 「09-18」).
+   */
+  @Test void 걸어갈_수_없는_스팟은_대신_걸어갈_곳을_준다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois[2].shortName").value("해금강"))
+        .andExpect(jsonPath("$.pois[2].walkTo.name").value("우제봉전망대"))
+        .andExpect(jsonPath("$.pois[2].walkTo.lat").value(34.7305356))
+        .andExpect(jsonPath("$.pois[2].walkTo.lng").value(128.6750255))
+        // 왜 스팟 자체로 못 걷는지 — 화면이 그대로 적는다. 문장은 데이터라 값을 박지 않는다.
+        .andExpect(jsonPath("$.pois[2].walkTo.note").isNotEmpty())
+        // 걸어갈 수 있는 스팟에는 없다 — 있으면 모든 스팟의 길찾기가 엉뚱한 곳으로 열린다
+        .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
+        .andExpect(jsonPath("$.pois[0].walkTo").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.pois[3].walkTo").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  /**
    * 화면이 말하는 스팟 수와 서버가 분류한 스팟 수가 같아야 한다.
    *
    * V4의 계약이 "화면은 theme 이 NULL 인 POI 를 목록에서 거른다"이므로, theme 가 붙은
