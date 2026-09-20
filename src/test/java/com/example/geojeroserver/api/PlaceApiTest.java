@@ -1,6 +1,7 @@
 package com.example.geojeroserver.api;
 
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,7 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * 맛집 13 · 숙소 7 (V40 · V43, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
+ * 맛집 14 · 숙소 7 · 카페 9 (V40 · V43 · V44~V46 · V47 — 기준문서 §6 「맛집 · 숙소 · 카페」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
  * 가까운 스팟은 진짜 pois(V1~)로 잰다 — 거리 · 제외 규칙이 실제 데이터에서 맞는지 본다.
  */
 @SpringBootTest
@@ -51,11 +52,11 @@ class PlaceApiTest {
         Map.of("checkintime", "15:00", "checkouttime", "11:00", "subfacility", "사우나 / 산책로 / 노래방"));
   }
 
-  @Test void 맛집_목록은_T맵_인기순_13곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
+  @Test void 맛집_목록은_T맵_인기순_14곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("문어해물칼국수", "연중무휴"));
     mvc.perform(get("/api/places?kind=FOOD"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(13))
+        .andExpect(jsonPath("$.places.length()").value(14))
         .andExpect(jsonPath("$.places[0].placeId").value(2783696))
         .andExpect(jsonPath("$.places[0].kind").value("FOOD"))
         .andExpect(jsonPath("$.places[0].name").value("대박난맛집"))
@@ -69,7 +70,74 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[12].placeId").value(2783397))
         .andExpect(jsonPath("$.places[12].name").value("성포끝집"))
         .andExpect(jsonPath("$.places[12].lat").value(34.9224143))
-        .andExpect(jsonPath("$.places[12].lng").value(128.5256862));
+        .andExpect(jsonPath("$.places[12].lng").value(128.5256862))
+        // 2026-09-20 사용자 — 거제 9미 중 비어 있던 2미 「거제굴구이」를 채웠다(V47). 포로수용소에서 280m 다
+        .andExpect(jsonPath("$.places[13].placeId").value(2900574))
+        .andExpect(jsonPath("$.places[13].name").value("포로수용소굴구이"))
+        .andExpect(jsonPath("$.places[13].nearSpot.shortName").value("포로수용소"))
+        .andExpect(jsonPath("$.places[13].nearSpot.distanceM").value(280));
+  }
+
+  /**
+   * 거제 9미(거제시 「9경9미9품」 — tour.geoje.go.kr)는 **음식 아홉 가지**이고 거제시가 식당을 지정하지 않는다
+   * (9미 상세 페이지 아홉 곳 모두 식당 목록 없음, 2026-09-20 확인). 그래서 어느 가게가 어느 미인지는
+   * **TourAPI 대표메뉴 · 가게 이름(원문)과 거제시 9미 목록(원문)의 대조**이고 그 결과를 V47 이 DB 에 적어 둔다
+   * — 9경 번호를 `pois.nine_scenic_no` 가 쥐는 것과 같은 자리다(기준문서 §6).
+   */
+  @Test void 맛집_카드는_거제_9미_번호를_준다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("문어해물칼국수", "연중무휴"));
+    mvc.perform(get("/api/places?kind=FOOD"))
+        .andExpect(status().isOk())
+        // 백만석 — 대표메뉴 「멍게비빔밥+대구탕+양념게장」에 1미(대구탕)와 3미(멍게 · 성게비빔밥)가 같이 있다
+        .andExpect(jsonPath("$.places[9].name").value("백만석"))
+        .andExpect(jsonPath("$.places[9].nineTasteNos").value(contains(1, 3)))
+        // 6미 멸치쌈밥 — 이름 + 대표메뉴 / 대표메뉴
+        .andExpect(jsonPath("$.places[8].name").value("거제멸치쌈밥"))
+        .andExpect(jsonPath("$.places[8].nineTasteNos").value(contains(6)))
+        .andExpect(jsonPath("$.places[5].name").value("점순이네밥집"))
+        .andExpect(jsonPath("$.places[5].nineTasteNos").value(contains(6)))
+        // 7미 생선회 · 물회 — 이름과 대표메뉴에 「물회」가 있다
+        .andExpect(jsonPath("$.places[7].name").value("웅아물회"))
+        .andExpect(jsonPath("$.places[7].nineTasteNos").value(contains(7)))
+        .andExpect(jsonPath("$.places[10].name").value("초정명가횟집 물회"))
+        .andExpect(jsonPath("$.places[10].nineTasteNos").value(contains(7)))
+        // 2미 굴구이 — 가게 이름이 근거다(대표메뉴는 「굴코스요리세트」)
+        .andExpect(jsonPath("$.places[13].nineTasteNos").value(contains(2)))
+        // 9미가 아닌 곳은 빈 배열이다 — 「아직 모른다」가 아니라 「원문이 9미라고 말하지 않는다」다
+        .andExpect(jsonPath("$.places[2].name").value("하면옥"))
+        .andExpect(jsonPath("$.places[2].nineTasteNos").value(empty()));
+  }
+
+  /**
+   * 강성횟집 · 어방가에는 9미 배지가 붙지 않는다 — 대표메뉴가 「강성스페셜」 · 「어방스페셜」이라 음식 이름이 걸리지 않고,
+   * 「횟집」은 가게 종류지 9미 음식 이름이 아니다. 「횟집」을 7미로 세면 TourAPI 거제 횟집 41곳이 전부 7미가 되어
+   * 배지가 뜻을 잃는다(2026-09-20 사용자 확인).
+   */
+  @Test void 횟집이라는_이름만으로는_9미가_되지_않는다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("강성스페셜", "연중무휴"));
+    mvc.perform(get("/api/places?kind=FOOD"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.places[1].name").value("강성횟집"))
+        .andExpect(jsonPath("$.places[1].nineTasteNos").value(empty()))
+        .andExpect(jsonPath("$.places[6].name").value("어방가"))
+        .andExpect(jsonPath("$.places[6].nineTasteNos").value(empty()));
+  }
+
+  @Test void 숙소와_카페에는_9미가_없다() throws Exception {
+    when(tourApi.placeInfo(any(), eq("32"))).thenReturn(stay());
+    when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("온더선셋라떼", "연중무휴"));
+    mvc.perform(get("/api/places?kind=STAY"))
+        .andExpect(jsonPath("$.places[0].nineTasteNos").value(empty()));
+    mvc.perform(get("/api/places?kind=CAFE"))
+        .andExpect(jsonPath("$.places[0].nineTasteNos").value(empty()));
+  }
+
+  @Test void 맛집_상세도_9미_번호를_준다() throws Exception {
+    when(tourApi.placeInfo(eq("578976"), eq("39"))).thenReturn(food("멍게비빔밥+대구탕+양념게장", "연중무휴"));
+    mvc.perform(get("/api/places/578976"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.name").value("백만석"))
+        .andExpect(jsonPath("$.nineTasteNos").value(contains(1, 3)));
   }
 
   @Test void 숙소_목록은_7곳이고_종류는_우리가_가진_등급_값이다() throws Exception {

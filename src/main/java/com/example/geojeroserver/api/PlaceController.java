@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 맛집 13 · 숙소 7 (V40 · V43, 2026-09-19 사용자 결정 — 기준문서 §6 「맛집 · 숙소」). 화면은 스팟 탭의 「맛집」 「숙소」 칩과 `/places/:placeId`.
+ * 맛집 14 · 숙소 7 · 카페 9 (V40 · V43 · V44~V46 · V47 — 기준문서 §6 「맛집 · 숙소 · 카페」). 화면은 스팟 탭의 「맛집」 「숙소」 「카페」 칩과 `/places/:placeId`.
  *
  * 우리 DB 에는 고른 곳 · 순서 · 등급 · 예약 주소만 있고, 소개 · 사진 · 영업시간 · 체크인은 TourAPI 런타임 호출이다(24h 캐시 —
  * 스팟과 같은 방식, 로컬 저장 안 함). TourAPI 가 실패해도 목록 · 상세는 이름 · 종류 · 가까운 스팟 · 예약 주소로 선다(detail FALLBACK).
@@ -34,22 +34,26 @@ public class PlaceController {
 
   public record NearSpot(long poiId, String shortName, int distanceM, double lat, double lng) {}
 
-  /** lat · lng — 홈 지도의 숙소 · 맛집 핀(2026-09-19). 우리 DB 값이라 TourAPI 가 실패해도 있다. */
+  /** lat · lng — 홈 지도의 숙소 · 맛집 핀(2026-09-19). 우리 DB 값이라 TourAPI 가 실패해도 있다.
+   *  nineTasteNos — 거제 9미 번호(V47, 2026-09-20). 9미가 아니면 **빈 배열**이다 — 「아직 모른다」가 아니라
+   *  「원문이 9미라고 말하지 않는다」다. */
   public record PlaceListItem(long placeId, String kind, String name, String category, String imageUrl,
-                              Integer grade, String restDay, NearSpot nearSpot, double lat, double lng) {}
+                              Integer grade, String restDay, NearSpot nearSpot, double lat, double lng,
+                              List<Integer> nineTasteNos) {}
 
   public record PlacesRes(List<PlaceListItem> places) {}
 
   public record PlaceDetailRes(long placeId, String kind, String name, String category, Integer grade,
                                double lat, double lng, String bookingUrl, List<NearSpot> nearSpots,
-                               Map<String, Object> detail) {}
+                               List<Integer> nineTasteNos, Map<String, Object> detail) {}
 
   /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서).
    *  coverImage — 목록 사진(카드 · 홈 핀) 대신 쓸 주소(V42 — 대표 사진이 세로인 곳 · V43 — 맛집은 첫 음식 사진).
-   *  foodImages — 맛집 상세에서 앞에 둘 음식 사진 주소(V43, 등록 순). TourAPI 가 지금 주는 사진만 순서를 바꾼다. */
+   *  foodImages — 맛집 상세에서 앞에 둘 음식 사진 주소(V43, 등록 순). TourAPI 가 지금 주는 사진만 순서를 바꾼다.
+   *  nineTasteNos — 거제 9미 번호(V47). 거제시 9미 목록과 TourAPI 대표메뉴 · 가게 이름을 대조한 결과다. */
   private record Place(long contentId, String kind, String name, double lat, double lng, String category,
                        Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages,
-                       String coverImage, List<String> foodImages) {
+                       String coverImage, List<String> foodImages, List<Integer> nineTasteNos) {
     String contentTypeId() {
       return hasMenu() ? "39" : "32";
     }
@@ -72,19 +76,24 @@ public class PlaceController {
   }
 
   private static final String PLACE_COLUMNS =
-      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, cover_image_url, food_image_urls";
+      "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, "
+          + "cover_image_url, food_image_urls, nine_taste_nos";
 
   private static Place place(java.sql.ResultSet rs) throws java.sql.SQLException {
     Object eng = rs.getObject("eng_content_id");
     java.sql.Array fallback = rs.getArray("fallback_image_urls");
     java.sql.Array food = rs.getArray("food_image_urls");
+    java.sql.Array tastes = rs.getArray("nine_taste_nos");
     return new Place(rs.getLong("content_id"), rs.getString("kind"), rs.getString("name"),
         rs.getBigDecimal("lat").doubleValue(), rs.getBigDecimal("lng").doubleValue(),
         rs.getString("category"), rs.getObject("grade", Integer.class), rs.getString("booking_url"),
         eng == null ? null : eng.toString(),
         fallback == null ? List.of() : List.of((String[]) fallback.getArray()),
         rs.getString("cover_image_url"),
-        food == null ? List.of() : List.of((String[]) food.getArray()));
+        food == null ? List.of() : List.of((String[]) food.getArray()),
+        // smallint[] 는 JDBC 가 Short[] 로 준다 — 화면 · JSON 은 숫자 하나로 다루면 되니 Integer 로 올린다
+        tastes == null ? List.of()
+            : java.util.Arrays.stream((Short[]) tastes.getArray()).map(Short::intValue).toList());
   }
 
   /**
@@ -159,7 +168,8 @@ public class PlaceController {
     var near = nearest(p, spots);
     return new PlaceListItem(p.contentId(), p.kind(), p.name(),
         menu ? intro.get("firstmenu") : p.category(), image, p.grade(),
-        menu ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng());
+        menu ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng(),
+        p.nineTasteNos());
   }
 
   @GetMapping("/api/places/{placeId}")
@@ -199,7 +209,7 @@ public class PlaceController {
     if (near.isEmpty() && !all.isEmpty()) near = List.of(all.get(0));
     return new PlaceDetailRes(p.contentId(), p.kind(), p.name(),
         menu ? (info == null ? null : info.intro().get("firstmenu")) : p.category(), p.grade(),
-        p.lat(), p.lng(), p.bookingUrl(), near, detail);
+        p.lat(), p.lng(), p.bookingUrl(), near, p.nineTasteNos(), detail);
   }
 
   /** 가까운 스팟 후보 — 화면 스팟 중 배로만 가는 곳(정류장이 없고 선착장이 있는 곳)을 뺀 곳. */
