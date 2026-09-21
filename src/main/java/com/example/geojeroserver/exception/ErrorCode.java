@@ -19,7 +19,8 @@ public enum ErrorCode {
 
     // Not Found(404)
     USER_NOT_FOUND("해당 사용자를 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
-    POI_NOT_FOUND("사진을 올릴 수 있는 스팟이 아닙니다.", HttpStatus.NOT_FOUND),
+    // 방문자 사진 · 스팟 하트가 같이 쓴다 — 없는 poi 이거나 화면에 나오는 스팟이 아닐 때
+    POI_NOT_FOUND("스팟을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     PHOTO_NOT_FOUND("사진을 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
     PLACE_NOT_FOUND("맛집 · 숙소를 찾을 수 없습니다.", HttpStatus.NOT_FOUND),
 

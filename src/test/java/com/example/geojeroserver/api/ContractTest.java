@@ -150,6 +150,24 @@ class ContractTest {
   }
 
   /**
+   * 스팟 하트(V49, 2026-09-21) — 스팟 목록 「추천순」의 근거. likeCount 는 비로그인에도 숫자로 늘 있고,
+   * featuredCourseCount 는 대표 코스(courses.featured_rank IS NOT NULL)에 그 스팟이 든 횟수다 —
+   * 클라가 하트 동률일 때 9경 번호 다음 기준으로 쓴다(디자인브리프 부록 Q).
+   *
+   * 값은 V37 대표 코스 데이터에서 온다(CourseDataTest 처럼 데이터 사실 단언): 바람의언덕은 대표 10개 중
+   * 4-11 · 3-12 · 3-11 · 4-12 · 3-14 다섯 코스에 들고, 청마기념관은 어느 코스에도 없다(복귀가 42번 06:40 한 편 —
+   * 코스재설계 §3). 대표 세트가 바뀌면 이 숫자도 같이 바뀐다.
+   */
+  @Test void POI목록_하트_수와_대표_코스에_든_횟수가_실린다() throws Exception {
+    mvc.perform(get("/api/pois"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.pois[0].shortName").value("바람의언덕"))
+        .andExpect(jsonPath("$.pois[0].likeCount").isNumber())
+        .andExpect(jsonPath("$.pois[0].featuredCourseCount").value(5))
+        .andExpect(jsonPath("$.pois[?(@.shortName == '청마기념관')].featuredCourseCount").value(0));
+  }
+
+  /**
    * 화면이 말하는 스팟 수와 서버가 분류한 스팟 수가 같아야 한다.
    *
    * V4의 계약이 "화면은 theme 이 NULL 인 POI 를 목록에서 거른다"이므로, theme 가 붙은

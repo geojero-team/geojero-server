@@ -1,13 +1,17 @@
 package com.example.geojeroserver.api;
 
+import jakarta.servlet.http.HttpServletRequest;
+import java.sql.Types;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import com.example.geojeroserver.auth.SessionCookies;
 import com.example.geojeroserver.tour.TourApiClient;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.SqlParameterValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,16 +27,20 @@ public class PoiController {
   // 도선으로 가는 섬(V31 shuttle_docks — 공곶이·내도 「구조라」 · 지심도 「장승포」). 나머지는 빈 목록.
   // nineScenicNo는 거제시 공식 9경 번호(V28 pois.nine_scenic_no). 9경이 아니면 null — 앱이 홈 지도 주황 테두리·
   // 「거제9경이란?」 목록 링크·스팟 시트 배지를 이 값으로 잇는다(앱에 poi_id 를 박지 않는다 — 환경마다 다를 수 있다).
+  // likeCount·liked·featuredCourseCount 는 스팟 하트(V49) — 스팟 목록 「추천순」의 근거(디자인브리프 부록 Q).
+  // likeCount 는 늘 있고, liked 는 토큰이 있을 때만 참이다(비로그인·깨진 토큰이어도 목록은 200). featuredCourseCount 는
+  // 대표 코스(courses.featured_rank)에 이 스팟이 든 횟수 — 클라가 하트 동률일 때 9경 번호 다음 기준으로 쓴다.
   public record PoiListItem(long poiId, String name, String shortName, String kind,
                             String theme, String region, String category, String tier,
                             boolean hasEnglish, Double lat, Double lng, String imageUrl,
                             String alightLabel, String timetableStop, boolean boardStopDiffers,
                             List<String> ferryDocks, Integer nineScenicNo, String summary,
-                            WalkTo walkTo) {
+                            WalkTo walkTo, long likeCount, boolean liked,
+                            int featuredCourseCount) {
     PoiListItem withImageUrl(String url) {
       return new PoiListItem(poiId, name, shortName, kind, theme, region, category, tier,
           hasEnglish, lat, lng, url, alightLabel, timetableStop, boardStopDiffers, ferryDocks,
-          nineScenicNo, summary, walkTo);
+          nineScenicNo, summary, walkTo, likeCount, liked, featuredCourseCount);
     }
   }
 
@@ -55,11 +63,12 @@ public class PoiController {
   // boardStopDiffers는 스팟 시간표와 같은 규칙(SpotTimetableController.alightDiffers) — 참이면 「시간표는 {timetableStop} 정류장 기준이에요」.
   // summary는 우리가 쓴 요약(V29 pois.summary — Claude 초안). TourAPI 원문(detail.overview)은 고치지 않고 그 위에 따로 붙는다.
   // 국문뿐이라 영문으로 답할 때(effLang=en)는 싣지 않는다.
+  // likeCount·liked 는 목록(PoiListItem)과 같은 값·규칙 — 두 화면이 다른 수를 말하지 않게 같은 서브쿼리다.
   public record PoiDetailRes(long poiId, String name, String kind, String tier,
                              String lang, boolean langFallback, Map<String, Object> detail,
                              String checkUrl, String lastDeparture,
                              String alightLabel, String timetableStop, boolean boardStopDiffers,
-                             String summary) {}
+                             String summary, long likeCount, boolean liked) {}
 
   /** numeric → Double. PgJDBC는 getObject(n, Double.class)를 numeric에 대해 지원하지 않는다. */
   private static Double toDouble(java.math.BigDecimal v) {
@@ -68,14 +77,18 @@ public class PoiController {
 
   private final JdbcTemplate jdbc;
   private final TourApiClient tourApi;
+  private final SessionCookies sessions;
 
-  public PoiController(JdbcTemplate jdbc, TourApiClient tourApi) {
+  public PoiController(JdbcTemplate jdbc, TourApiClient tourApi, SessionCookies sessions) {
     this.jdbc = jdbc;
     this.tourApi = tourApi;
+    this.sessions = sessions;
   }
 
   @GetMapping("/api/pois")
-  public PoisRes list(@RequestParam(defaultValue = "false") boolean withImages) {
+  public PoisRes list(HttpServletRequest req,
+      @RequestParam(defaultValue = "false") boolean withImages) {
+    Long uid = sessions.verify(req); // require() 가 아니다 — 목록은 비로그인. 깨진 토큰은 liked=false 일 뿐이다
     var rows = jdbc.query("""
         SELECT p.poi_id, p.poi_name, p.short_name, p.poi_kind, p.theme, p.region,
                p.category, p.tier,
@@ -88,6 +101,12 @@ public class PoiController {
                p.walk_to_name, p.walk_to_lat, p.walk_to_lng, p.walk_to_note,
                -- summary(V29, 우리가 쓴 요약)는 목록에도 내려준다 — 스팟 탭의 「크게 보기」가 카드에 쓴다(2026-09-17)
                p.summary,
+               -- 스팟 하트(V49): 수 · 내가 눌렀는가(uid 가 NULL 이면 거짓) · 대표 코스에 든 횟수
+               (SELECT count(*) FROM spot_likes l WHERE l.poi_id = p.poi_id) AS like_count,
+               EXISTS(SELECT 1 FROM spot_likes l
+                      WHERE l.poi_id = p.poi_id AND l.user_id = ?) AS liked,
+               (SELECT count(*) FROM course_pois cp JOIN courses c ON c.course_id = cp.course_id
+                 WHERE cp.poi_id = p.poi_id AND c.featured_rank IS NOT NULL) AS featured_course_count,
                -- 배를 타는 선착장: 외도 유람선(ferry_links DESTINATION, seq 순) 뒤에 도선(V31 shuttle_docks)
                (SELECT string_agg(x.name, '·' ORDER BY x.ord)
                   FROM (SELECT d.short_name AS name, d.seq AS ord
@@ -114,10 +133,12 @@ public class PoiController {
                   toDouble(rs.getBigDecimal("lng")), null,
                   alight, stop, SpotTimetableController.alightDiffers(stop, alight),
                   docks == null ? List.of() : List.of(docks.split("·")),
-                  rs.getObject("nine_scenic_no", Integer.class), rs.getString("summary"), walkTo),
+                  rs.getObject("nine_scenic_no", Integer.class), rs.getString("summary"), walkTo,
+                  rs.getLong("like_count"), rs.getBoolean("liked"),
+                  rs.getInt("featured_course_count")),
               rs.getString("tour_content_id"), rs.getBoolean("image_use_ok"),
               rs.getString("intro_text"), rs.getString("photo_keyword"));
-        });
+        }, userParam(uid));
 
     if (!withImages) return new PoisRes(rows.stream().map(Row::item).toList());
 
@@ -167,15 +188,20 @@ public class PoiController {
   }
 
   @GetMapping("/api/pois/{poiId}")
-  public PoiDetailRes detail(@PathVariable long poiId,
+  public PoiDetailRes detail(HttpServletRequest req, @PathVariable long poiId,
       @RequestParam(defaultValue = "ko") String lang) {
+    Long uid = sessions.verify(req); // 목록과 같다 — 상세도 비로그인
     return jdbc.queryForObject("""
         SELECT p.poi_id, p.poi_name, p.poi_kind, p.tier, p.intro_text, p.check_url,
                p.last_departure_time, p.tour_content_id, p.image_use_ok, p.photo_keyword,
                p.alight_label, p.timetable_stop, p.summary,
                (SELECT i.tour_content_id FROM poi_i18n i
                  WHERE i.poi_id = p.poi_id AND i.lang = 'EN'
-                   AND i.matched_by = 'HUMAN') AS en_content_id
+                   AND i.matched_by = 'HUMAN') AS en_content_id,
+               -- 스팟 하트(V49) — 목록과 같은 서브쿼리
+               (SELECT count(*) FROM spot_likes l WHERE l.poi_id = p.poi_id) AS like_count,
+               EXISTS(SELECT 1 FROM spot_likes l
+                      WHERE l.poi_id = p.poi_id AND l.user_id = ?) AS liked
         FROM pois p WHERE p.poi_id = ?""",
         (rs, i) -> {
           String enContentId = rs.getString("en_content_id");
@@ -206,8 +232,17 @@ public class PoiController {
               rs.getString("check_url"),
               last == null ? null : last.format(DateTimeFormatter.ofPattern("HH:mm")),
               alight, stop, SpotTimetableController.alightDiffers(stop, alight),
-              "ko".equals(effLang) ? rs.getString("summary") : null);
-        }, poiId);
+              "ko".equals(effLang) ? rs.getString("summary") : null,
+              rs.getLong("like_count"), rs.getBoolean("liked"));
+        }, userParam(uid), poiId);
+  }
+
+  /**
+   * 비로그인이면 uid 가 null 이다. 타입 없는 null 은 JdbcTemplate 이 드라이버에 타입을 물어 보내는데 그 답이
+   * 드라이버마다 달라, bigint 로 못박아 넘긴다 — `l.user_id = NULL` 은 거짓이라 liked 가 false 로 떨어진다.
+   */
+  private static SqlParameterValue userParam(Long uid) {
+    return new SqlParameterValue(Types.BIGINT, uid);
   }
 
   /**

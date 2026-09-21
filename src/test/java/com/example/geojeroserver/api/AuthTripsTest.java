@@ -76,12 +76,15 @@ class AuthTripsTest {
    * 「탈퇴 시까지 보관」이라고 말하려면 실제로 지울 길이 있어야 한다.
    *
    * 여기서 지키는 것은 **users 한 행만 지우면 그 사람의 것이 전부 사라진다**는 규칙이다.
-   * 표가 늘어날 때 이 테스트가 먼저 깨지게 두려고, 저장 일정과 방문자 사진(바이트까지)을
-   * 만들어 두고 함께 사라지는지 본다.
+   * 표가 늘어날 때 이 테스트가 먼저 깨지게 두려고, 저장 일정과 방문자 사진(바이트까지) ·
+   * 스팟 하트(V49)를 만들어 두고 함께 사라지는지 본다.
    */
   @Test
-  void 탈퇴하면_계정과_저장한_코스_사진이_함께_지워진다() throws Exception {
+  void 탈퇴하면_계정과_저장한_코스_사진_하트가_함께_지워진다() throws Exception {
     final String oauthId = "test-oauth-withdraw";
+    // 이 계정은 탈퇴(DELETE /api/me)로만 정리된다 — 앞선 실행이 중간에 깨졌으면 계정과 저장 코스가 남아
+    // 아래 저장이 409(이미 저장한 코스)가 된다. 시작할 때 지운다.
+    jdbc.update("DELETE FROM users WHERE provider = 'KAKAO' AND oauth_id = ?", oauthId);
     when(kakao.exchange("withdraw-code", "http://localhost/cb"))
         .thenReturn(new KakaoGateway.KakaoUser(oauthId, "탈퇴할유저"));
     var login = mvc.perform(post("/api/auth/kakao").contentType(MediaType.APPLICATION_JSON)
@@ -105,6 +108,7 @@ class AuthTripsTest {
         VALUES (?, ?, NULL, 1, 1, 1) RETURNING photo_id""", Long.class, poiId, uid);
     jdbc.update("INSERT INTO visitor_photo_blobs (photo_id, jpeg) VALUES (?, ?)",
         photoId, new byte[] {1});
+    jdbc.update("INSERT INTO spot_likes (poi_id, user_id) VALUES (?, ?)", poiId, uid);
 
     mvc.perform(delete("/api/me").cookie(cookie))
         .andExpect(status().isNoContent())
@@ -119,6 +123,8 @@ class AuthTripsTest {
         "SELECT count(*) FROM visitor_photos WHERE photo_id = ?", Integer.class, photoId));
     assertEquals(0, (int) jdbc.queryForObject(
         "SELECT count(*) FROM visitor_photo_blobs WHERE photo_id = ?", Integer.class, photoId));
+    assertEquals(0, (int) jdbc.queryForObject(
+        "SELECT count(*) FROM spot_likes WHERE user_id = ?", Integer.class, uid));
 
     // 남아 있는 세션으로는 아무것도 못 한다 — 계정이 없으면 401 이다
     mvc.perform(get("/api/me").cookie(cookie)).andExpect(status().isUnauthorized());
