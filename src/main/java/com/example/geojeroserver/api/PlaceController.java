@@ -2,8 +2,10 @@ package com.example.geojeroserver.api;
 
 import com.example.geojeroserver.exception.BusinessException;
 import com.example.geojeroserver.exception.ErrorCode;
+import com.example.geojeroserver.auth.SessionCookies;
 import com.example.geojeroserver.tour.TourApiClient;
 import com.example.geojeroserver.tour.TourApiClient.PlaceInfo;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -37,15 +39,18 @@ public class PlaceController {
   /** lat · lng — 홈 지도의 숙소 · 맛집 핀(2026-09-19). 우리 DB 값이라 TourAPI 가 실패해도 있다.
    *  nineTasteNos — 거제 9미 번호(V47, 2026-09-20). 9미가 아니면 **빈 배열**이다 — 「아직 모른다」가 아니라
    *  「원문이 9미라고 말하지 않는다」다. */
+  /** likeCount · liked — 맛집 · 숙소 · 카페 하트(V51). likeCount 는 늘 있고, liked 는 토큰이 있을 때만 참이다
+   *  (비로그인 · 깨진 토큰이어도 목록은 200 — 스팟 하트와 같은 규칙, 디자인브리프 부록 Q). */
   public record PlaceListItem(long placeId, String kind, String name, String category, String imageUrl,
                               Integer grade, String restDay, NearSpot nearSpot, double lat, double lng,
-                              List<Integer> nineTasteNos) {}
+                              List<Integer> nineTasteNos, long likeCount, boolean liked) {}
 
   public record PlacesRes(List<PlaceListItem> places) {}
 
   public record PlaceDetailRes(long placeId, String kind, String name, String category, Integer grade,
                                double lat, double lng, String bookingUrl, List<NearSpot> nearSpots,
-                               List<Integer> nineTasteNos, Map<String, Object> detail) {}
+                               List<Integer> nineTasteNos, long likeCount, boolean liked,
+                               Map<String, Object> detail) {}
 
   /** fallbackImages — TourAPI 가 사진을 0장 줄 때 쓰는 사진 주소(V41 — 지금은 한화 하나, 운영 키로 영문 사진이 안 와서).
    *  coverImage — 목록 사진(카드 · 홈 핀) 대신 쓸 주소(V42 — 대표 사진이 세로인 곳 · V43 — 맛집은 첫 음식 사진).
@@ -53,7 +58,8 @@ public class PlaceController {
    *  nineTasteNos — 거제 9미 번호(V47). 거제시 9미 목록과 TourAPI 대표메뉴 · 가게 이름을 대조한 결과다. */
   private record Place(long contentId, String kind, String name, double lat, double lng, String category,
                        Integer grade, String bookingUrl, String engContentId, List<String> fallbackImages,
-                       String coverImage, List<String> foodImages, List<Integer> nineTasteNos) {
+                       String coverImage, List<String> foodImages, List<Integer> nineTasteNos,
+                       long likeCount, boolean liked) {
     String contentTypeId() {
       return hasMenu() ? "39" : "32";
     }
@@ -69,15 +75,19 @@ public class PlaceController {
 
   private final JdbcTemplate jdbc;
   private final TourApiClient tourApi;
+  private final SessionCookies sessions;
 
-  public PlaceController(JdbcTemplate jdbc, TourApiClient tourApi) {
+  public PlaceController(JdbcTemplate jdbc, TourApiClient tourApi, SessionCookies sessions) {
     this.jdbc = jdbc;
     this.tourApi = tourApi;
+    this.sessions = sessions;
   }
 
   private static final String PLACE_COLUMNS =
       "content_id, kind, name, lat, lng, category, grade, booking_url, eng_content_id, fallback_image_urls, "
-          + "cover_image_url, food_image_urls, nine_taste_nos";
+          + "cover_image_url, food_image_urls, nine_taste_nos, "
+          + "(SELECT count(*) FROM place_likes l WHERE l.place_id = places.content_id) AS like_count, "
+          + "EXISTS(SELECT 1 FROM place_likes l WHERE l.place_id = places.content_id AND l.user_id = ?) AS liked";
 
   private static Place place(java.sql.ResultSet rs) throws java.sql.SQLException {
     Object eng = rs.getObject("eng_content_id");
@@ -93,7 +103,8 @@ public class PlaceController {
         food == null ? List.of() : List.of((String[]) food.getArray()),
         // smallint[] 는 JDBC 가 Short[] 로 준다 — 화면 · JSON 은 숫자 하나로 다루면 되니 Integer 로 올린다
         tastes == null ? List.of()
-            : java.util.Arrays.stream((Short[]) tastes.getArray()).map(Short::intValue).toList());
+            : java.util.Arrays.stream((Short[]) tastes.getArray()).map(Short::intValue).toList(),
+        rs.getLong("like_count"), rs.getBoolean("liked"));
   }
 
   /**
@@ -127,12 +138,13 @@ public class PlaceController {
   }
 
   @GetMapping("/api/places")
-  public PlacesRes list(@RequestParam String kind) {
+  public PlacesRes list(HttpServletRequest req, @RequestParam String kind) {
     if (!"FOOD".equals(kind) && !"STAY".equals(kind) && !"CAFE".equals(kind)) {
       throw new BusinessException(ErrorCode.VALIDATION_FAILED);
     }
+    // require() 가 아니다 — 목록은 비로그인. 깨진 토큰은 liked=false 일 뿐이다(스팟 목록과 같은 규칙).
     var places = jdbc.query("SELECT " + PLACE_COLUMNS + " FROM places WHERE kind = ? ORDER BY sort_order",
-        (rs, i) -> place(rs), kind);
+        (rs, i) -> place(rs), uid(req), kind);
     var spots = spots();
 
     // TourAPI 는 곳마다 부른다 — 동시에 던진다(PoiController 와 같은 방식). 캐시(24h)가 찬 뒤에는 호출이 없다.
@@ -169,13 +181,13 @@ public class PlaceController {
     return new PlaceListItem(p.contentId(), p.kind(), p.name(),
         menu ? intro.get("firstmenu") : p.category(), image, p.grade(),
         menu ? intro.get("restdatefood") : null, near.isEmpty() ? null : near.getFirst(), p.lat(), p.lng(),
-        p.nineTasteNos());
+        p.nineTasteNos(), p.likeCount(), p.liked());
   }
 
   @GetMapping("/api/places/{placeId}")
-  public PlaceDetailRes detail(@PathVariable long placeId) {
+  public PlaceDetailRes detail(HttpServletRequest req, @PathVariable long placeId) {
     var found = jdbc.query("SELECT " + PLACE_COLUMNS + " FROM places WHERE content_id = ?",
-        (rs, i) -> place(rs), placeId);
+        (rs, i) -> place(rs), uid(req), placeId);
     if (found.isEmpty()) throw new BusinessException(ErrorCode.PLACE_NOT_FOUND);
     Place p = found.getFirst();
     boolean menu = p.hasMenu();
@@ -209,7 +221,16 @@ public class PlaceController {
     if (near.isEmpty() && !all.isEmpty()) near = List.of(all.get(0));
     return new PlaceDetailRes(p.contentId(), p.kind(), p.name(),
         menu ? (info == null ? null : info.intro().get("firstmenu")) : p.category(), p.grade(),
-        p.lat(), p.lng(), p.bookingUrl(), near, p.nineTasteNos(), detail);
+        p.lat(), p.lng(), p.bookingUrl(), near, p.nineTasteNos(), p.likeCount(), p.liked(), detail);
+  }
+
+  /**
+   * 하트 서브쿼리에 넘길 사용자. 비로그인 · 깨진 토큰이면 NULL 이고 `l.user_id = NULL` 은 거짓이라 liked 가 false 다.
+   * 드라이버가 타입을 못 잡는 일이 없게 bigint 로 못박아 넘긴다(PoiController 와 같은 방식).
+   */
+  private Object uid(HttpServletRequest req) {
+    Long uid = sessions.verify(req);
+    return uid == null ? new org.springframework.jdbc.core.SqlParameterValue(java.sql.Types.BIGINT, null) : uid;
   }
 
   /** 가까운 스팟 후보 — 화면 스팟 중 배로만 가는 곳(정류장이 없고 선착장이 있는 곳)을 뺀 곳. */

@@ -41,6 +41,9 @@ public class VisitorPhotoController {
 
   public record VisitorPhotosRes(long poiId, int count, List<VisitorPhoto> photos) {}
 
+  /** 맛집 · 숙소 · 카페의 사진 목록(V51) — 스팟과 같은 모양이고 첫 필드 이름만 다르다. */
+  public record PlaceVisitorPhotosRes(long placeId, int count, List<VisitorPhoto> photos) {}
+
   private final JdbcTemplate jdbc;
   private final SessionCookies sessions;
 
@@ -63,18 +66,52 @@ public class VisitorPhotoController {
     return new VisitorPhotosRes(poiId, photos.size(), photos);
   }
 
+  /**
+   * 맛집 · 숙소 · 카페의 방문자 사진 — 스팟과 **같은 표**(visitor_photos, V51)를 쓴다.
+   * 사진 하나에 id 하나여야 보기(`/api/visitor-photos/{id}/image`) · 삭제 · 신고가 두 갈래로 갈리지 않는다.
+   */
+  @GetMapping("/api/places/{placeId}/visitor-photos")
+  public PlaceVisitorPhotosRes listForPlace(HttpServletRequest req, @PathVariable long placeId) {
+    requirePlace(placeId);
+    Long uid = sessions.verify(req); // 보기는 비로그인
+    var photos = jdbc.query("""
+        SELECT photo_id, user_id, caption, width, height,
+               (created_at AT TIME ZONE 'Asia/Seoul')::date::text AS uploaded_date
+        FROM visitor_photos WHERE place_id = ? AND hidden_at IS NULL
+        ORDER BY created_at DESC, photo_id DESC""",
+        (rs, i) -> toPhoto(rs, uid), placeId);
+    return new PlaceVisitorPhotosRes(placeId, photos.size(), photos);
+  }
+
+  @PostMapping("/api/places/{placeId}/visitor-photos")
+  public ResponseEntity<VisitorPhoto> uploadToPlace(HttpServletRequest req, @PathVariable long placeId,
+      @RequestParam(required = false) MultipartFile file,
+      @RequestParam(required = false) String caption) throws IOException {
+    long uid = requireExistingUser(req);
+    requirePlace(placeId);
+    return store("place_id", placeId, uid, file, caption);
+  }
+
   @PostMapping("/api/pois/{poiId}/visitor-photos")
   public ResponseEntity<VisitorPhoto> upload(HttpServletRequest req, @PathVariable long poiId,
       @RequestParam(required = false) MultipartFile file,
       @RequestParam(required = false) String caption) throws IOException {
     long uid = requireExistingUser(req);
     requireSpot(poiId);
+    return store("poi_id", poiId, uid, file, caption);
+  }
+
+  /**
+   * 사진 한 장을 받아 다시 인코딩해 저장한다. 스팟이든 맛집이든 **같은 길**이다 — 다른 것은 어느 열에 넣느냐뿐이다.
+   * 원본 바이트는 이 메서드 안에서만 산다(저장 · 로그 어디에도 넘기지 않는다).
+   */
+  private ResponseEntity<VisitorPhoto> store(String column, long targetId, long uid,
+      MultipartFile file, String caption) throws IOException {
     if (file == null || file.isEmpty()) {
       throw new BusinessException(ErrorCode.FILE_REQUIRED);
     }
     String text = normalizeCaption(caption);
 
-    // 원본 바이트는 이 메서드 안에서만 산다 — 저장·로그 어디에도 넘기지 않는다.
     // 크기와 무관하게 항상 다시 인코딩한다. 작다고 건너뛰면 GPS 가 그대로 저장된다.
     VisitorPhotoImages.Encoded img;
     try {
@@ -88,9 +125,9 @@ public class VisitorPhotoController {
     }
 
     // 바이트는 별도 테이블이다. @Transactional 을 쓰는 곳이 없으므로 한 문장으로 두 테이블에 넣는다.
-    var row = jdbc.queryForMap("""
+    var row = jdbc.queryForMap(("""
         WITH p AS (
-          INSERT INTO visitor_photos (poi_id, user_id, caption, width, height, byte_size)
+          INSERT INTO visitor_photos (%s, user_id, caption, width, height, byte_size)
           VALUES (?, ?, ?, ?, ?, ?)
           RETURNING photo_id, caption, width, height, created_at
         ), b AS (
@@ -98,8 +135,8 @@ public class VisitorPhotoController {
         )
         SELECT photo_id, caption, width, height,
                (created_at AT TIME ZONE 'Asia/Seoul')::date::text AS uploaded_date
-        FROM p""",
-        poiId, uid, text, img.width(), img.height(), img.jpeg().length, img.jpeg());
+        FROM p""").formatted(column),
+        targetId, uid, text, img.width(), img.height(), img.jpeg().length, img.jpeg());
 
     long photoId = ((Number) row.get("photo_id")).longValue();
     return ResponseEntity.status(HttpStatus.CREATED).body(new VisitorPhoto(photoId,
@@ -215,6 +252,14 @@ public class VisitorPhotoController {
         "SELECT 1 FROM pois WHERE poi_id = ? AND (theme IS NOT NULL OR poi_kind = 'TERMINAL')",
         Integer.class, poiId).isEmpty()) {
       throw new BusinessException(ErrorCode.POI_NOT_FOUND);
+    }
+  }
+
+  /** 우리 목록에 있는 맛집 · 숙소 · 카페만 사진 칸이 있다. */
+  private void requirePlace(long placeId) {
+    if (jdbc.queryForList("SELECT 1 FROM places WHERE content_id = ?", Integer.class, placeId)
+        .isEmpty()) {
+      throw new BusinessException(ErrorCode.PLACE_NOT_FOUND);
     }
   }
 

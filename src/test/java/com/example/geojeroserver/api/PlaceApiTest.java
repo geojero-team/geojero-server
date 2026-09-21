@@ -26,7 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * 맛집 14 · 숙소 7 · 카페 9 (V40 · V43 · V44~V46 · V47 — 기준문서 §6 「맛집 · 숙소 · 카페」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
+ * 맛집 15 · 숙소 9 · 카페 15 (V40 · V43 · V44~V46 · V47 · V50 — 기준문서 §6 「맛집 · 숙소 · 카페」). TourAPI 는 가짜로 바꿔 끼운다 — 테스트에는 키가 없다.
  * 가까운 스팟은 진짜 pois(V1~)로 잰다 — 거리 · 제외 규칙이 실제 데이터에서 맞는지 본다.
  */
 @SpringBootTest
@@ -52,11 +52,11 @@ class PlaceApiTest {
         Map.of("checkintime", "15:00", "checkouttime", "11:00", "subfacility", "사우나 / 산책로 / 노래방"));
   }
 
-  @Test void 맛집_목록은_T맵_인기순_14곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
+  @Test void 맛집_목록은_T맵_인기순_15곳이고_카드는_대표메뉴_쉬는날_사진_가까운스팟() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("문어해물칼국수", "연중무휴"));
     mvc.perform(get("/api/places?kind=FOOD"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(14))
+        .andExpect(jsonPath("$.places.length()").value(15))
         .andExpect(jsonPath("$.places[0].placeId").value(2783696))
         .andExpect(jsonPath("$.places[0].kind").value("FOOD"))
         .andExpect(jsonPath("$.places[0].name").value("대박난맛집"))
@@ -75,7 +75,11 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[13].placeId").value(2900574))
         .andExpect(jsonPath("$.places[13].name").value("포로수용소굴구이"))
         .andExpect(jsonPath("$.places[13].nearSpot.shortName").value("포로수용소"))
-        .andExpect(jsonPath("$.places[13].nearSpot.distanceM").value(280));
+        .andExpect(jsonPath("$.places[13].nearSpot.distanceM").value(280))
+        // 2026-09-22 사용자 — 15곳으로 늘리며 남부권이 대박난맛집 하나뿐이라 그 자리를 채웠다(V50)
+        .andExpect(jsonPath("$.places[14].placeId").value(2899866))
+        .andExpect(jsonPath("$.places[14].name").value("몽그레식당 학동본점"))
+        .andExpect(jsonPath("$.places[14].nearSpot.shortName").value("학동몽돌해변"));
   }
 
   /**
@@ -140,24 +144,31 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.nineTasteNos").value(contains(1, 3)));
   }
 
-  @Test void 숙소_목록은_7곳이고_종류는_우리가_가진_등급_값이다() throws Exception {
+  @Test void 숙소_목록은_9곳이고_종류는_우리가_가진_등급_값이다() throws Exception {
     when(tourApi.placeInfo(any(), eq("32"))).thenReturn(stay());
     mvc.perform(get("/api/places?kind=STAY"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(7))
+        .andExpect(jsonPath("$.places.length()").value(9))
         .andExpect(jsonPath("$.places[0].name").value("소노캄 거제"))
         .andExpect(jsonPath("$.places[0].category").value("콘도"))
-        .andExpect(jsonPath("$.places[5].name").value("호텔상상"))
-        .andExpect(jsonPath("$.places[5].category").value("2성 호텔"))
-        .andExpect(jsonPath("$.places[5].grade").value(2))
-        .andExpect(jsonPath("$.places[5].restDay").doesNotExist());
+        // V50 — 12개월 내내 2위인데 공식 등급이 없어 빠져 있던 곳이 인기순으로 넓히며 6번째로 들어왔다
+        .andExpect(jsonPath("$.places[5].name").value("프래밀리풀빌라호텔"))
+        .andExpect(jsonPath("$.places[5].category").value("호텔"))
+        .andExpect(jsonPath("$.places[5].grade").doesNotExist())
+        .andExpect(jsonPath("$.places[6].name").value("호텔상상"))
+        .andExpect(jsonPath("$.places[6].category").value("2성 호텔"))
+        .andExpect(jsonPath("$.places[6].grade").value(2))
+        .andExpect(jsonPath("$.places[6].restDay").doesNotExist())
+        // 남부권 유일 숙소(V50)
+        .andExpect(jsonPath("$.places[8].name").value("거제 썬트리팜리조트"))
+        .andExpect(jsonPath("$.places[8].category").value("리조트"));
   }
 
   @Test void 관광정보를_못받아도_목록은_이름_종류_가까운스팟으로_나온다() throws Exception {
     when(tourApi.placeInfo(any(), any())).thenReturn(null);
     mvc.perform(get("/api/places?kind=STAY"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(7))
+        .andExpect(jsonPath("$.places.length()").value(9))
         .andExpect(jsonPath("$.places[0].category").value("콘도"))
         .andExpect(jsonPath("$.places[0].imageUrl").doesNotExist())
         .andExpect(jsonPath("$.places[0].nearSpot.shortName").value("거제씨월드"));
@@ -203,11 +214,11 @@ class PlaceApiTest {
    * T맵 인기순 → TourAPI 에 있고 사진이 있을 것 → 체인 제외. 우리가 고르지 않는다(기준문서 §6).
    * TourAPI 분류가 맛집과 같은 음식점(39)이라 카드도 같은 모양이다 — 대표 메뉴 · 쉬는 날 · 사진 · 가까운 스팟.
    */
-  @Test void 카페_목록은_T맵_인기순_9곳이고_카드는_맛집과_같은_모양이다() throws Exception {
+  @Test void 카페_목록은_T맵_인기순_15곳이고_카드는_맛집과_같은_모양이다() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("선셋커피", "연중무휴"));
     mvc.perform(get("/api/places?kind=CAFE"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.places.length()").value(9))
+        .andExpect(jsonPath("$.places.length()").value(15))
         .andExpect(jsonPath("$.places[0].placeId").value(2857087))
         .andExpect(jsonPath("$.places[0].kind").value("CAFE"))
         .andExpect(jsonPath("$.places[0].name").value("온더선셋"))
@@ -219,11 +230,13 @@ class PlaceApiTest {
         .andExpect(jsonPath("$.places[0].lat").value(34.9162065))
         .andExpect(jsonPath("$.places[0].lng").value(128.5197758))
         .andExpect(jsonPath("$.places[6].name").value("글래씨스"))
-        // 남부권 둘은 인기순 자리 그대로다 — 무지개펜션 39위가 썬트리팜 46위보다 앞이다(V46)
-        .andExpect(jsonPath("$.places[7].placeId").value(3060359))
-        .andExpect(jsonPath("$.places[7].name").value("무지개펜션에스프레소"))
-        .andExpect(jsonPath("$.places[8].placeId").value(2912639))
-        .andExpect(jsonPath("$.places[8].name").value("썬트리팜 카페"));
+        // V50 — 15곳으로 늘리며 권역이 얇은 쪽부터 여섯 곳을 더했다. 순서는 인기 점수 그대로라 뒤 둘이 밀렸다
+        .andExpect(jsonPath("$.places[7].name").value("외도널서리"))
+        .andExpect(jsonPath("$.places[8].name").value("몰리힐스"))
+        .andExpect(jsonPath("$.places[13].placeId").value(3060359))
+        .andExpect(jsonPath("$.places[13].name").value("무지개펜션에스프레소"))
+        .andExpect(jsonPath("$.places[14].placeId").value(2912639))
+        .andExpect(jsonPath("$.places[14].name").value("썬트리팜 카페"));
   }
 
   /**
@@ -233,13 +246,14 @@ class PlaceApiTest {
   @Test void 남부권_카페_둘이_남부면_스팟_옆에_있다() throws Exception {
     when(tourApi.placeInfo(any(), eq("39"))).thenReturn(food("아메리카노", "연중무휴"));
     mvc.perform(get("/api/places?kind=CAFE"))
-        .andExpect(jsonPath("$.places[7].name").value("무지개펜션에스프레소"))
-        .andExpect(jsonPath("$.places[7].nearSpot.shortName").value("여차홍포해안도로"))
+        // V50 에서 여섯 곳이 앞에 들어와 자리가 13 · 14 로 밀렸다 — 순서는 인기 점수 그대로다
+        .andExpect(jsonPath("$.places[13].name").value("무지개펜션에스프레소"))
+        .andExpect(jsonPath("$.places[13].nearSpot.shortName").value("여차홍포해안도로"))
         // 대표 사진이 통나무집 외관이라 카드가 펜션으로 읽혔다 — 목록 사진만 등록 순 첫 추가 사진으로(V46)
-        .andExpect(jsonPath("$.places[7].imageUrl")
+        .andExpect(jsonPath("$.places[13].imageUrl")
             .value("https://tong.visitkorea.or.kr/cms/resource/54/3052254_image2_1.JPG"))
-        .andExpect(jsonPath("$.places[8].name").value("썬트리팜 카페"))
-        .andExpect(jsonPath("$.places[8].nearSpot.shortName").value("도장포유람선"));
+        .andExpect(jsonPath("$.places[14].name").value("썬트리팜 카페"))
+        .andExpect(jsonPath("$.places[14].nearSpot.shortName").value("도장포유람선"));
   }
 
   /**
