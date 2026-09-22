@@ -31,11 +31,13 @@ class CourseDataTest {
    * recommended_courses.txt 확정본 23개 + 배 구간을 쓰는 3-11(V36) + 코스 재설계 2차 세트 새 코스 9개(V37 —
    * 3-12 · 3-13 · 4-11 · 4-12 · 5-04 · 6-01, 대표 8~10번 3-14 · 3-15 · 3-16. 여섯 곳 코스는 처음이다).
    */
-  @Test void 추천코스는_33개이고_코드가_스팟수_순위순이다() {
+  @Test void 추천코스는_37개이고_코드가_스팟수_순위순이다() {
     var codes = jdbc.queryForList("""
         SELECT course_code FROM courses
         WHERE course_code IS NOT NULL ORDER BY spot_count, rank_no""", String.class);
     assertEquals(List.of(
+        // 2곳은 섬 코스 넷(V54) — 스팟 수 순이라 맨 앞이다
+        "2-01", "2-02", "2-03", "2-04",
         "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-07", "3-08", "3-09", "3-10", "3-11",
         "3-12", "3-13", "3-14", "3-15", "3-16",
         "4-01", "4-02", "4-03", "4-04", "4-05", "4-06", "4-07", "4-08", "4-09", "4-10", "4-11", "4-12",
@@ -102,15 +104,21 @@ class CourseDataTest {
       int ferryRoundTrips = jdbc.queryForObject(
           "SELECT count(*) / 2 FROM course_legs WHERE course_id = ? AND mode = 'FERRY'",
           Integer.class, id);
-      // 되짚기 = 마지막 구간이 아닌데 고현터미널로 가는 구간
+      /* 도선(SHUTTLE · V52~V54)은 왕복마다 구간을 **둘** 더한다 — 유람선(하나)과 다르다.
+         들어가는 편은 버스 구간과 **같은 섬에 닿고**(화면이 점을 한 번만 찍는다), 나오는 편은 선착장으로 나와
+         닿는 스팟이 없다. 둘 다 스팟 수로는 세어지지 않으므로 그대로 더한다. */
+      int shuttleLegs = jdbc.queryForObject(
+          "SELECT count(*) FROM course_legs WHERE course_id = ? AND mode = 'SHUTTLE'",
+          Integer.class, id);
+      // 되짚기 = 마지막 구간이 아닌데 고현터미널로 가는 구간. 나오는 도선은 선착장으로 나오는 것이라 되짚기가 아니다.
       int backtracks = jdbc.queryForObject("""
           SELECT count(*) FROM course_legs l
-          WHERE l.course_id = ? AND l.to_poi_id IS NULL
+          WHERE l.course_id = ? AND l.to_poi_id IS NULL AND l.mode <> 'SHUTTLE'
             AND l.leg_seq < (SELECT max(leg_seq) FROM course_legs WHERE course_id = l.course_id)""",
           Integer.class, id);
-      assertEquals(spots + 1 + ferryRoundTrips + backtracks, jdbc.queryForObject(
+      assertEquals(spots + 1 + ferryRoundTrips + shuttleLegs + backtracks, jdbc.queryForObject(
           "SELECT count(*) FROM course_legs WHERE course_id = ?", Integer.class, id),
-          code + ": 구간이 스팟 수 + 1(+ 배 왕복 수 + 되짚기 수)이 아니다 — 체인이 끊겼다");
+          code + ": 구간이 스팟 수 + 1(+ 배 왕복 수 + 도선 구간 수 + 되짚기 수)이 아니다 — 체인이 끊겼다");
 
       // 고현터미널(NULL)에서 시작해 고현터미널로 끝난다
       assertNull(jdbc.queryForObject(
@@ -123,11 +131,23 @@ class CourseDataTest {
 
       // 구간의 to 가 다음 구간의 from 과 이어진다
       var seq = rows("""
-          SELECT leg_seq, from_poi_id, to_poi_id FROM course_legs
+          SELECT leg_seq, mode, from_poi_id, to_poi_id FROM course_legs
           WHERE course_id = ? ORDER BY leg_seq""", id);
       for (int i = 0; i < seq.size() - 1; i++) {
-        assertEquals(seq.get(i).get("to_poi_id"), seq.get(i + 1).get("from_poi_id"),
-            code + ": 구간 " + (i + 1) + "→" + (i + 2) + " 가 이어지지 않는다");
+        var cur = seq.get(i);
+        var nxt = seq.get(i + 1);
+        String where = code + ": 구간 " + (i + 1) + "→" + (i + 2) + " 가 이어지지 않는다";
+        /* 도선 구간(V52~V54)의 **뭍 쪽 끝은 선착장**이라 NULL 이다 — 고현터미널이 아니다.
+           그래서 섬 쪽 끝끼리 이어진다:
+             · 다음이 들어가는 도선이면 앞 구간과 **같은 섬에 닿는다**(버스가 정류장까지, 배가 섬까지).
+             · 이번이 나오는 도선이면 다음 구간은 **그 섬에서 떠난다**. */
+        if ("SHUTTLE".equals(nxt.get("mode").toString()) && nxt.get("from_poi_id") == null) {
+          assertEquals(cur.get("to_poi_id"), nxt.get("to_poi_id"), where);
+        } else if ("SHUTTLE".equals(cur.get("mode").toString()) && cur.get("to_poi_id") == null) {
+          assertEquals(cur.get("from_poi_id"), nxt.get("from_poi_id"), where);
+        } else {
+          assertEquals(cur.get("to_poi_id"), nxt.get("from_poi_id"), where);
+        }
       }
     }
   }
@@ -143,7 +163,7 @@ class CourseDataTest {
         FROM course_legs a
         JOIN courses c ON c.course_id = a.course_id
         JOIN course_legs n ON n.course_id = a.course_id AND n.leg_seq = a.leg_seq + 1
-        WHERE c.course_code IS NOT NULL AND a.to_poi_id IS NULL""")) {
+        WHERE c.course_code IS NOT NULL AND a.to_poi_id IS NULL AND a.mode <> 'SHUTTLE'""")) {
       String where = b.get("course_code") + " 구간" + b.get("leg_seq");
       assertNull(b.get("n_from"), where + ": 고현터미널로 간 다음 구간이 고현터미널에서 떠나지 않는다");
       assertEquals("BUS", b.get("a_mode").toString(), where);
@@ -156,14 +176,14 @@ class CourseDataTest {
     assertEquals(0, jdbc.queryForObject("""
         SELECT count(*) FROM (
           SELECT l.course_id FROM course_legs l
-          WHERE l.to_poi_id IS NULL
+          WHERE l.to_poi_id IS NULL AND l.mode <> 'SHUTTLE'
             AND l.leg_seq < (SELECT max(leg_seq) FROM course_legs WHERE course_id = l.course_id)
           GROUP BY l.course_id HAVING count(*) > 1) x""", Integer.class), "되짚기가 두 번인 코스가 있다");
     // 되짚기가 있는 코스는 V37 의 여덟 개다(① · ③ · ④ · ⑥ · ⑦ · ⑧ · ⑨ · ⑩). ② 는 직행으로만 잇는다.
     // ⑧ 포로수용소 · ⑩ 거제식물원은 고현터미널과만 이어지고, ⑨ 해금강 → 옥포대첩기념공원은 직행이 없다.
     assertEquals(List.of("3-12", "3-13", "3-14", "3-15", "3-16", "4-11", "4-12", "5-04"), jdbc.queryForList("""
         SELECT DISTINCT c.course_code FROM course_legs l JOIN courses c ON c.course_id = l.course_id
-        WHERE l.to_poi_id IS NULL
+        WHERE l.to_poi_id IS NULL AND l.mode <> 'SHUTTLE'
           AND l.leg_seq < (SELECT max(leg_seq) FROM course_legs WHERE course_id = l.course_id)
         ORDER BY c.course_code""", String.class));
   }
@@ -249,15 +269,20 @@ class CourseDataTest {
         JOIN pois pt ON pt.poi_id = l.to_poi_id
         WHERE c.course_code IS NOT NULL AND l.mode = 'SAME_STOP'""");
 
-    assertEquals(11, same.size(), "조선해양문화관 → 씨월드 9개 + 씨월드 → 조선해양문화관 1개 + 도장포유람선 → 바람의언덕 1개");
+    assertEquals(12, same.size(),
+        "조선해양문화관 → 씨월드 9개 + 씨월드 → 조선해양문화관 1개 + 도장포유람선 → 바람의언덕 1개 + 지심도 → 양지암조각공원 1개");
     assertEquals(9, same.stream().filter(x -> "거제조선해양문화관".equals(x.get("frm"))).count());
     assertEquals(List.of("3-16"), same.stream().filter(x -> "거제씨월드".equals(x.get("frm")))
         .map(x -> (String) x.get("course_code")).toList());
     for (var s : same) {
+      /* 이 종류는 「버스를 타지 않고 다음 스팟으로 간다」는 뜻이다 — 보통은 두 스팟이 **같은 정류장**을 써서 그렇고,
+         2-01(V54)은 **배에서 내려 걸어간다**. 장승포 선착장에서 양지암조각공원까지 직선 1,750m 이고
+         그 사이를 잇는 버스 구간이 없다(지심도의 walk_to 가 걷는 시작점을 선착장으로 옮긴다). */
       assertTrue(("거제조선해양문화관".equals(s.get("frm")) && "거제씨월드".equals(s.get("dst")))
           || ("거제씨월드".equals(s.get("frm")) && "거제조선해양문화관".equals(s.get("dst")))
-          || ("도장포유람선".equals(s.get("frm")) && "바람의언덕".equals(s.get("dst"))),
-          "같은 정류장 쌍이 아니다: " + s);
+          || ("도장포유람선".equals(s.get("frm")) && "바람의언덕".equals(s.get("dst")))
+          || ("지심도".equals(s.get("frm")) && "양지암조각공원".equals(s.get("dst"))),
+          "버스 없이 걸어가는 쌍이 아니다: " + s);
       assertEquals(0, ((Number) s.get("duration_min")).intValue());
       assertEquals(0L, ((Number) s.get("rides")).longValue(), "버스를 타지 않는다");
       assertEquals(s.get("depart_time"), s.get("arrive_time"),
@@ -349,7 +374,8 @@ class CourseDataTest {
     var titled = rows("""
         SELECT course_code, title, intro FROM courses
         WHERE title IS NOT NULL OR intro IS NOT NULL ORDER BY course_code""");
-    assertEquals(List.of("3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-11", "3-12", "3-13",
+    assertEquals(List.of("2-01", "2-02", "2-03", "2-04",
+            "3-01", "3-02", "3-03", "3-04", "3-05", "3-06", "3-11", "3-12", "3-13",
             "3-14", "3-15", "3-16",
             "4-02", "4-03", "4-09", "4-10", "4-11", "4-12", "5-01", "5-04", "6-01"),
         titled.stream().map(r -> (String) r.get("course_code")).toList());
@@ -372,9 +398,11 @@ class CourseDataTest {
    * 8~10번은 나머지 세 자리 후보 조사 · 반박 검증을 통과한 셋이다 — ⑧ 거제시 3일코스(OFFICIAL) · ⑨ ⑩ 분류(THEME).
    * 옛 코스 24개 중 3-11 을 뺀 23개는 대표가 아니다 — 지우지 않는다(저장 일정 · 지도 화면이 쓴다).
    */
-  @Test void 대표코스는_열이고_순서와_성격축이_정해져_있다() {
+  @Test void 대표코스는_열넷이고_순서와_성격축이_정해져_있다() {
     assertEquals(List.of("1 4-11 OFFICIAL", "2 6-01 OFFICIAL", "3 3-12 THEME", "4 3-13 THEME",
-            "5 3-11 THEME", "6 4-12 NINE", "7 5-04 NINE", "8 3-14 OFFICIAL", "9 3-15 THEME", "10 3-16 THEME"),
+            "5 3-11 THEME", "6 4-12 NINE", "7 5-04 NINE", "8 3-14 OFFICIAL", "9 3-15 THEME", "10 3-16 THEME",
+            // 11~14 는 섬 코스 넷(V54) — 9경 둘 · 분류 둘로 갈랐다
+            "11 2-01 NINE", "12 2-02 THEME", "13 2-03 NINE", "14 2-04 THEME"),
         rows("""
             SELECT featured_rank, course_code, badge_axis FROM courses
             WHERE featured_rank IS NOT NULL ORDER BY featured_rank""").stream()

@@ -220,6 +220,23 @@ public class CourseController {
       Integer stayMin, boolean landsOnOedo, String dockName, String bookingUrl) {}
 
   /**
+   * 이 구간이 타는 **도선**(V31 · V52). {@code mode == "SHUTTLE"} 일 때만 있다.
+   *
+   * 유람선(FERRY)과 갈라 둔다 — 유람선은 상품(코스 · 선상/상륙 · 예약 상품 페이지)이고,
+   * 도선은 섬으로 건너가는 배다. 값은 전부 {@code shuttle_docks} 원문이고 여기서 계산하는 것이 없다.
+   *   dockName     타는 선착장(「장승포」 · 「구조라」)
+   *   islandName   건너가는 섬(「지심도」 · 「내도」)
+   *   operatorName 운항사 — 결항을 물어볼 곳이다
+   *   fareText     요금 원문(왕복). 없으면 null
+   *   bookingUrl   예약처. 없으면 null — 그때는 전화가 유일한 길이다
+   *   notice       원문 주의 문구(「성수기 미예약 시 탑승이 어려울 수 있습니다」)
+   *
+   * ⚠️ 유람선과 달리 **출항 시각을 구간에 적는다** — 도선은 날짜와 무관하게 시각이 고정이다(shuttle_departures).
+   */
+  public record ShuttleRide(String dockName, String islandName, String operatorName,
+      String phone, String fareText, String bookingUrl, String notice) {}
+
+  /**
    * {@code service} · {@code holidayNoBus} 는 BUS 구간에만 있다(FERRY · SAME_STOP 은 둘 다 null) — LegService · LegCalc 주석.
    * {@code board} · {@code alight} 는 **service.routeNo 의 정류장**이다 — 구간 줄이 적는 노선을 기다릴 곳이라서.
    * 대표 노선이 없으면(옛 폴백) 탄 편의 노선으로 찾는다.
@@ -228,7 +245,7 @@ public class CourseController {
       Long toPoiId, String toName, String departAt, String arriveAt,
       int durationMin, int transfers, int transferWaitMin,
       boolean estimated, List<Ride> rides, StopWalk board, StopWalk alight,
-      FerryRide ferry, LegService service, Boolean holidayNoBus) {}
+      FerryRide ferry, ShuttleRide shuttle, LegService service, Boolean holidayNoBus) {}
 
   /**
    * featuredRank · badgeAxis · officialCourse 는 카드(CourseCard)와 같은 값 · 같은 모양이다 — 대표가 아닌 코스는 셋 다 null.
@@ -437,7 +454,7 @@ public class CourseController {
   private Map<Long, Integer> ferryMinByCourse() {
     var out = new LinkedHashMap<Long, Integer>();
     jdbc.query("SELECT course_id, COALESCE(sum(duration_min), 0) AS min_sum"
-        + " FROM course_legs WHERE mode = 'FERRY' GROUP BY course_id",
+        + " FROM course_legs WHERE mode IN ('FERRY', 'SHUTTLE') GROUP BY course_id",
         rs -> {
           out.put(rs.getLong("course_id"), rs.getInt("min_sum"));
         });
@@ -637,12 +654,15 @@ public class CourseController {
                COALESCE(pt.short_name, pt.poi_name) AS to_name,
                pf.timetable_stop AS from_stop, pt.timetable_stop AS to_stop,
                fc.legend_label, fc.course_name AS ferry_course_name, fc.total_text,
-               fc.oedo_stay_min, fc.lands_on_oedo, fc.booking_url, fd.short_name AS dock_name
+               fc.oedo_stay_min, fc.lands_on_oedo, fc.booking_url, fd.short_name AS dock_name,
+               sd.dock_name AS shuttle_dock, sd.island_name, sd.operator_name, sd.phone,
+               sd.fare_text, sd.booking_url AS shuttle_booking_url, sd.notice
         FROM course_legs l
         LEFT JOIN pois pf ON pf.poi_id = l.from_poi_id
         LEFT JOIN pois pt ON pt.poi_id = l.to_poi_id
         LEFT JOIN ferry_courses fc ON fc.course_id = l.ferry_course_id
         LEFT JOIN ferry_docks   fd ON fd.dock_id   = fc.dock_id
+        LEFT JOIN shuttle_docks sd ON sd.shuttle_id = l.shuttle_id
         WHERE l.course_id = ? ORDER BY l.leg_seq""", courseId)) {
       long legId = num(l.get("leg_id"));
       var rides = jdbc.query("""
@@ -676,13 +696,22 @@ public class CourseController {
               (String) l.get("total_text"), (Integer) l.get("oedo_stay_min"),
               Boolean.TRUE.equals(l.get("lands_on_oedo")), (String) l.get("dock_name"),
               (String) l.get("booking_url"));
+      // 도선 구간에만 도선이 붙는다(V52 의 chk_leg_shuttle_dock 이 그것을 지킨다).
+      ShuttleRide shuttle = l.get("island_name") == null ? null
+          : new ShuttleRide((String) l.get("shuttle_dock"), (String) l.get("island_name"),
+              (String) l.get("operator_name"), (String) l.get("phone"),
+              (String) l.get("fare_text"), (String) l.get("shuttle_booking_url"),
+              (String) l.get("notice"));
+      // 도선 구간의 **빈 쪽은 고현터미널이 아니라 선착장**이다 — 배는 뭍의 선착장과 섬 사이를 오간다.
+      // 다른 구간의 빈 쪽은 출발지(고현터미널)라는 옛 약속이 그대로 남는다.
+      String landName = shuttle != null ? shuttle.dockName() : ORIGIN_NAME;
       legs.add(new Leg(
           (int) num(l.get("leg_seq")), mode,
-          fromPoi, fromPoi == null ? ORIGIN_NAME : (String) l.get("from_name"),
-          toPoi, toPoi == null ? ORIGIN_NAME : (String) l.get("to_name"),
+          fromPoi, fromPoi == null ? landName : (String) l.get("from_name"),
+          toPoi, toPoi == null ? landName : (String) l.get("to_name"),
           hm(l.get("depart_time")), hm(l.get("arrive_time")),
           (int) num(l.get("duration_min")), (int) num(l.get("transfers")),
-          (int) num(l.get("transfer_wait_min")), est, rides, board, alight, ferry,
+          (int) num(l.get("transfer_wait_min")), est, rides, board, alight, ferry, shuttle,
           service, calc == null ? null : calc.holidayNoBus()));
     }
 
@@ -692,7 +721,9 @@ public class CourseController {
     // 배 · 같은 정류장 구간은 버스가 아니라 세지 않는다.
     int busMin = legs.stream().filter(x -> "BUS".equals(x.mode()))
         .mapToInt(x -> x.service() != null ? x.service().durationMin() : x.durationMin()).sum();
-    int ferryMin = legs.stream().filter(x -> "FERRY".equals(x.mode())).mapToInt(Leg::durationMin).sum();
+    // 배 분에는 유람선과 도선을 함께 센다 — 화면이 「배 약 N분」 하나로 말한다.
+    int ferryMin = legs.stream().filter(x -> "FERRY".equals(x.mode()) || "SHUTTLE".equals(x.mode()))
+        .mapToInt(Leg::durationMin).sum();
     var noBusLegs = legs.stream().filter(x -> Boolean.TRUE.equals(x.holidayNoBus()))
         .map(x -> new LegName(x.fromName(), x.toName())).toList();
     return new CourseDetail(courseId, (String) c.get("course_code"),
